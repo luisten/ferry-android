@@ -2,6 +2,7 @@
 plugins {
     id("com.android.application") version "9.4.1"
     id("org.jetbrains.kotlin.plugin.compose") version "2.4.20"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.20"
 }
 
 android {
@@ -28,4 +29,6 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0") // the engine's JSON, as Swift's Codable
+    testImplementation("junit:junit:4.13.2") // tests only, never in the app
 }

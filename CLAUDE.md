@@ -7,9 +7,10 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A0 (2026-10-20): the Gradle project, the engine with its JNI bridge, one login on the emulator showing
-the chat count. No chat screens yet. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the
-bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+**Status:** A1 (2026-10-20): the chat model (`model/`: the iOS app's `Room`, `Timeline`, `Inbox`, `SyncTypes`,
+`BridgeAPI`, in Kotlin) with 162 unit tests on the engine's golden files and the Matrix-style fixtures. A0 before it:
+the Gradle project, the engine with its JNI bridge, one login on the emulator showing the chat count. No chat screens
+yet (A2). The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -17,6 +18,7 @@ user-visible change adds a line under Unreleased.
 ```sh
 export JAVA_HOME=~/Library/Android/jdk/jdk-21.0.12.1+1/Contents/Home ANDROID_HOME=~/Library/Android/sdk PATH=~/sdk/go1.27.1/bin:$PATH
 ./gradlew assembleDebug                         # runs build-engine.sh (libigcore.so, arm64-v8a), then the APK
+./gradlew testDebugUnitTest                     # the model's tests, on the JVM, ~5 s (results: app/build/test-results)
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ~/Library/Android/sdk/emulator/emulator -avd igcore_ps16k -no-snapshot -gpu host   # with a window: logins need one
 adb logcat -s ferry                             # C6 counts: logged each time the app leaves the screen (HOME)
@@ -70,8 +72,17 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 
 - **Dependencies (E7): Google's own only** (Kotlin, Compose/Material 3, AndroidX, Media3 when needed), exact versions,
   each checksummed in `gradle/verification-metadata.xml`; Gradle itself pinned by `distributionSha256Sum`. Name the
-  library and version to the user and wait for a yes before adding one; never a dynamic version. The platform covers
-  the web view, the Keystore and JSON (`org.json`): no library for those.
+  library and version to the user and wait for a yes before adding one; never a dynamic version. Approved beyond
+  that: `kotlinx-serialization-json` (Kotlin's own, the engine's JSON, as Swift's `Codable`) with its compiler plugin,
+  and JUnit 4 for tests only. The platform covers the web view and the Keystore: no library for those.
+- **The chat model (`model/`) is a port of the iOS app's, kept close to it** (same names, same order, the Swift
+  doc comments) so a fix on one side ports to the other: change both, and port the tests with it. It models what
+  the engine sends (core/chat) and nothing of Ferry's bridge: no send statuses ("delivered"), no bridge bot, no
+  `xma_fetch_status` failures, no personal spaces, room summary, server-side `m.tag` or implicit DM names. Pure: no
+  `android.*`, so the tests run on the JVM. Glyphs are `Glyph` values; the screens pick the Material Symbol.
+- **Fixtures** (`app/src/test/resources/fixtures`) are copied unchanged from the iOS repo at the pinned commit, and
+  `engine_*.json` are the engine's own output: when the pin moves and core/chat's output changed, copy them again
+  (their README). Tests say where a bridge-era fixture's extras (its bot, its spaces) changed what they assert.
 - `compileSdk` 37 because Compose 1.12 requires it; `targetSdk` 36 decides behaviour (the emulator is API 36).
 - Engine calls are blocking and can wait on the network: never on the main thread. `IGNextEvent` is polled on its own
   thread; state the screen reads changes on the main thread only (`Engine`).
@@ -93,5 +104,10 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - The emulator image's WebView is Chrome 133 (Feb 2025) and can't update (no Play Store); a phone's is current.
 - `shouldOverrideUrlLoading` sees neither POSTs nor in-page (history API) navigations, so the logout block is
   defence in depth, as on iOS.
+- **`org.json` can't be used in the model:** it's a stub in JVM unit tests ("not mocked"), which is why the model
+  decodes with kotlinx-serialization.
+- **kotlinx's `JsonPrimitive` answers `doubleOrNull`/`booleanOrNull` for strings too** ("12" is 12.0): the model's
+  accessors (`string`, `number`, `long`, `bool` in Events.kt) check `isString` first, as Swift's `JSON` enum does.
+- Kotlin can't alias a nested enum or sealed type with a `val` (`val p = Timeline.GroupPosition`): import its values.
 - `--write-verification-metadata` prints "resolved during configuration time" warnings for every configuration:
   harmless, gone in a normal build.
