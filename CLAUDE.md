@@ -8,10 +8,8 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 chat model and the design; this file holds what's Android's own.
 
 **Status:** A0 (2026-10-20): the Gradle project, the engine with its JNI bridge, one login on the emulator showing
-the chat count. No chat screens yet. **The bridge isn't merged in the iOS repo yet** (branch `claude/android-jni`):
-the pinned 443b80e has none, so builds need a `go.work` pointing at that branch's worktree (below) until the user
-merges it and this repo pins the merge. The README is for users (plain words, no
-internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+the chat count. No chat screens yet. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the
+bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -33,9 +31,10 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 
 - **Pinned in `go.mod`** as `github.com/luisten/ferry-messenger/core` at a commit (pseudo-version; no tags until
   the API settles, tags are the user's), its `cmd/igcore` named by a `tool` line so `go mod tidy` keeps it. Bump:
-  `go get -tool github.com/luisten/ferry-messenger/core/cmd/igcore@<commit>`, then check that `go.mod`'s `replace`
-  still matches core's own (Go doesn't carry a dependency's `replace` over: without it the build silently uses
-  upstream `imroc/req`, not Beeper's fork).
+  `go get -tool github.com/luisten/ferry-messenger/core/cmd/igcore@<commit>` and `go mod tidy`, then check that
+  `go.mod`'s `replace` still matches core's own (Go doesn't carry a dependency's `replace` over: without it the build
+  silently uses upstream `imroc/req`, not Beeper's fork) and that `go.sum` is core's `go.sum` plus the engine's own
+  two lines (`sort go.sum | comm -23 - <(git -C <iOS repo> show <commit>:core/go.sum | sort)`).
 - **The JNI bridge is `core/cmd/igcore/jni_android.c` in the iOS repo** (decision E6), beside the C API it wraps;
   cgo compiles it only for Android. Its symbols name `fi.ferry.core.IGCore` ([IGCore.kt](app/src/main/kotlin/fi/ferry/core/IGCore.kt)):
   moving that class or package breaks the bridge. Strings cross as UTF-8 `ByteArray`s, never `jstring` (emoji).
