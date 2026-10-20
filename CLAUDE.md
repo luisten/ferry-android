@@ -7,10 +7,11 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A1 (2026-10-20): the chat model (`model/`: the iOS app's `Room`, `Timeline`, `Inbox`, `SyncTypes`,
-`BridgeAPI`, in Kotlin) with 162 unit tests on the engine's golden files and the Matrix-style fixtures. A0 before it:
-the Gradle project, the engine with its JNI bridge, one login on the emulator showing the chat count. No chat screens
-yet (A2). The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+**Status:** A2 (2026-10-20): the inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card,
+rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
+applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
+its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
+JNI bridge, the login. Threads come with A3. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -22,6 +23,7 @@ export JAVA_HOME=~/Library/Android/jdk/jdk-21.0.12.1+1/Contents/Home ANDROID_HOM
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ~/Library/Android/sdk/emulator/emulator -avd igcore_ps16k -no-snapshot -gpu host   # with a window: logins need one
 adb logcat -s ferry                             # C6 counts: logged each time the app leaves the screen (HOME)
+adb shell am start -n fi.ferry.messenger/.MainActivity --ez demo true   # debug: made-up data, nothing connects
 ./gradlew --write-verification-metadata sha256 help assembleDebug   # after a dependency change; review the diff
 git ls-files | xargs grep -nE '"sessionid"\s*:\s*"[^"]{12,}|/Users/[a-z]'   # secret and home-path scan: expect nothing
 ```
@@ -61,6 +63,11 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   flushes. A process killed mid-login leaves that attempt's cookies until the next login clears them.
 - **Nothing secret or message text goes to Logcat:** the page's console is swallowed (`onConsoleMessage`), `ferry`
   logs counts and account IDs only, the engine's own log goes to stderr (`/dev/null` in an app).
+- **One live user of the dummies at a time.** Other sessions (the iOS app's) test with the same accounts: before a
+  live check, message them "LOCK: <accounts>, <what>, <expected requests>" and wait for "OK"; afterwards send
+  "RELEASED" (and background or stop the app, so its client disconnects). Answer theirs the same way.
+- **Check screens on the demo first** (`--ez demo true`, `Demo.kt`, debug builds only): the iOS app's made-up accounts,
+  chats, requests and group; the engine isn't even loaded, so it costs no Instagram action.
 - **Live checks use the two dummies only** (stand-ins `tamoveska` personal, `kivostudio` professional; real names only
   in the iOS repo's gitignored `docs/local/test-accounts.md`). Every login, launch, send and "Seen" is an Instagram
   action: count them (C6) and report them.
@@ -85,7 +92,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   (their README). Tests say where a bridge-era fixture's extras (its bot, its spaces) changed what they assert.
 - `compileSdk` 37 because Compose 1.12 requires it; `targetSdk` 36 decides behaviour (the emulator is API 36).
 - Engine calls are blocking and can wait on the network: never on the main thread. `IGNextEvent` is polled on its own
-  thread; state the screen reads changes on the main thread only (`Engine`).
+  thread; everything the screens read changes on the main thread only (`AppModel`). Rooms are plain mutable objects:
+  reading `AppModel.rooms` subscribes a screen, and the map is re-sent after each batch of updates.
+- **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
+  only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name. Glyphs are a few
+  Material Icons path strings in `ui/Icons.kt`, not a library. Profile pictures load https only, in memory (`Pictures`).
+- An account gets its default name, colour and mark (`AccountIdentity.withDefaults`) only once Instagram has said who
+  it is (its viewer, kept in SharedPreferences with identities, Requests markers and the scope); else a stored
+  account from before would be named by its ID for good.
 
 ## Traps (each one bit us)
 

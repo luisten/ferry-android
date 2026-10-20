@@ -7,6 +7,10 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.text.Collator
 import java.text.Normalizer
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /** Pure inbox rules (the iOS app's Inbox.swift, DESIGN §4): which chats show, where, in what order, with which counts. */
 object Inbox {
@@ -362,6 +366,33 @@ object Inbox {
         kind.media?.let { return Preview(it.glyph, prefix + it.label) }
         val body = Timeline.body(content).lines().filter { it.isNotEmpty() }.joinToString(" ")
         return Preview(null, (if (kind == MessageKind.ChatEvent) "" else prefix) + body) // an event names who did it
+    }
+
+    /**
+     * Patterns for the row's time, from the phone's settings (`android.text.format.DateFormat`: 12 or 24 hours, the
+     * locale's order); the defaults are for tests.
+     */
+    data class TimeFormats(
+        val time: String = "HH:mm",
+        val weekday: String = "EEE",
+        val date: String = "d MMM",
+        val dateWithYear: String = "d MMM y",
+        val locale: Locale = Locale.ROOT,
+    )
+
+    /** Row time: "9:41" today, "Yesterday", the weekday within a week, then a short date (with the year if not this one). */
+    fun timeLabel(ts: Long, now: Long, zone: ZoneId, formats: TimeFormats = TimeFormats()): String {
+        val date = Instant.ofEpochMilli(ts).atZone(zone)
+        val day = date.toLocalDate()
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        val pattern = when {
+            day == today -> formats.time
+            day == today.minusDays(1) -> return "Yesterday"
+            !day.isBefore(today.minusDays(6)) -> formats.weekday
+            day.year == today.year -> formats.date
+            else -> formats.dateWithYear
+        }
+        return date.format(DateTimeFormatter.ofPattern(pattern, formats.locale))
     }
 
     // Connection banner (DESIGN §7.2)

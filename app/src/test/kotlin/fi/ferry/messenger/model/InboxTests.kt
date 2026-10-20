@@ -425,6 +425,37 @@ class InboxTests {
         assertEquals("A, B and C keep working.", Inbox.othersKeepWorking(listOf("A", "B", "C")))
     }
 
+    // Identity defaults and the row's time
+
+    @Test fun defaultIdentitiesFollowThePaletteOrder() {
+        val ids = AccountIdentity.withDefaults(emptyMap(), accounts())
+        assertEquals(AccountIdentity("Tamo Veska", AccountColor.OCEAN, "T", 0), ids[Fixture.tamoLogin])
+        assertEquals(AccountIdentity("Kivo Studio", AccountColor.EMBER, "K", 1), ids[Fixture.kivoLogin])
+    }
+
+    @Test fun defaultsKeepExistingAndAvoidATakenColorAndMark() {
+        val mine = AccountIdentity("Studio", AccountColor.OCEAN, "K", 5)
+        val ids = AccountIdentity.withDefaults(mapOf(Fixture.tamoLogin to mine), accounts())
+        assertEquals(mine, ids[Fixture.tamoLogin])
+        // "K" is taken, so the next distinct letter of "Kivo Studio"; Ocean is taken, so Ember.
+        assertEquals(AccountIdentity("Kivo Studio", AccountColor.EMBER, "I", 6), ids[Fixture.kivoLogin])
+    }
+
+    @Test fun aDuplicateDisplayNameFallsBackToTheUsername() {
+        val logins = accounts().let { listOf(it[0], it[1].copy(profile = it[1].profile?.copy(name = "Tamo Veska"))) }
+        assertEquals("kivostudio", AccountIdentity.withDefaults(emptyMap(), logins)[Fixture.kivoLogin]?.name)
+    }
+
+    @Test fun timeLabel() {
+        val utc = java.time.ZoneOffset.UTC // NOW is 2026-10-13 14:00 UTC
+        val day = 86_400_000L
+        assertEquals("13:59", Inbox.timeLabel(NOW - 60_000, NOW, utc))
+        assertEquals("Yesterday", Inbox.timeLabel(NOW - day, NOW, utc))
+        assertEquals("Sat", Inbox.timeLabel(NOW - 3 * day, NOW, utc, Inbox.TimeFormats(locale = java.util.Locale.US)))
+        assertEquals("1 Aug", Inbox.timeLabel(1_785_585_600_000, NOW, utc)) // 2026-08-01
+        assertEquals("1 Aug 2025", Inbox.timeLabel(1_754_049_600_000, NOW, utc))
+    }
+
     // Account stack (DESIGN §3.5): side by side, up to three, then the first two and "+N"
 
     private fun account(name: String, health: BridgeAPI.Login.Health = BridgeAPI.Login.Health.Connected) =
