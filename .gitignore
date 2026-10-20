@@ -1,0 +1,17 @@
+# Gradle and Android Studio
+build/
+.gradle/
+.kotlin/
+.idea/
+*.iml
+local.properties
+
+# A local checkout of the engine while its JNI bridge changes (CLAUDE.md): never committed
+go.work
+go.work.sum
+
+# Local-only notes (real test-account names and the like), screenshots that can show real accounts
+docs/local/
+.claude/
+
+.DS_Store
