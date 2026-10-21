@@ -2,6 +2,7 @@ package fi.ferry.messenger.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,7 +44,7 @@ import fi.ferry.messenger.model.Room
 
 /** I2–I4: one folder in a scope. In All, Requests has a section per account (DESIGN §4.3). Read-only for now. */
 @Composable
-fun FolderScreen(folder: Folder, scope: Inbox.Scope, back: () -> Unit) {
+fun FolderScreen(folder: Folder, scope: Inbox.Scope, openThread: (String) -> Unit, back: () -> Unit) {
     BackHandler(onBack = back)
     // Looking at Requests clears the card and the badge for what's listed; leaving covers what arrived meanwhile.
     if (folder == Folder.REQUESTS) {
@@ -83,19 +84,19 @@ fun FolderScreen(folder: Folder, scope: Inbox.Scope, back: () -> Unit) {
                                 Text("${section.size}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
-                        rows(section, showsMark = false, times)
+                        rows(section, showsMark = false, times, openThread)
                     }
                 } else {
-                    rows(rooms, showsMark = scope == Inbox.Scope.All && multi, times)
+                    rows(rooms, showsMark = scope == Inbox.Scope.All && multi, times, openThread)
                 }
             }
         }
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.rows(rooms: List<Room>, showsMark: Boolean, times: Inbox.TimeFormats) {
+private fun androidx.compose.foundation.lazy.LazyListScope.rows(rooms: List<Room>, showsMark: Boolean, times: Inbox.TimeFormats, open: (String) -> Unit) {
     items(rooms, key = { it.id }) { room ->
-        ChatRow(room, showsMark, times)
+        ChatRow(room, showsMark, times, Modifier.clickable { open(room.id) })
         HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }

@@ -24,6 +24,7 @@ import fi.ferry.messenger.ui.AccountsSheet
 import fi.ferry.messenger.ui.FerryTheme
 import fi.ferry.messenger.ui.FolderScreen
 import fi.ferry.messenger.ui.InboxScreen
+import fi.ferry.messenger.ui.ThreadScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
 private sealed interface Screen {
     data object Inbox : Screen
     data class Folder(val folder: fi.ferry.messenger.model.Inbox.Folder, val scope: fi.ferry.messenger.model.Inbox.Scope) : Screen
+    data class Thread(val room: String) : Screen
     data object Login : Screen
 }
 
@@ -66,8 +68,13 @@ private fun App() {
             cookies?.let(AppModel::login)
         }
         AppModel.accounts.isEmpty() -> Welcome { push(Screen.Login) }
-        screen is Screen.Folder -> FolderScreen(screen.folder, screen.scope, ::pop)
-        else -> InboxScreen(openFolder = { folder, scope -> push(Screen.Folder(folder, scope)) }, openAccounts = { accountsOpen = true })
+        screen is Screen.Thread -> ThreadScreen(screen.room, ::pop)
+        screen is Screen.Folder -> FolderScreen(screen.folder, screen.scope, { push(Screen.Thread(it)) }, ::pop)
+        else -> InboxScreen(
+            openThread = { push(Screen.Thread(it)) },
+            openFolder = { folder, scope -> push(Screen.Folder(folder, scope)) },
+            openAccounts = { accountsOpen = true },
+        )
     }
     if (accountsOpen) AccountsSheet(dismiss = { accountsOpen = false }, addAccount = { accountsOpen = false; push(Screen.Login) })
 }

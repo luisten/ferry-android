@@ -67,7 +67,7 @@ import java.time.ZoneId
 
 /** I1, the inbox (DESIGN §4, I1): account stack, title, Folders menu, scope bar, the Requests card, chat rows. */
 @Composable
-fun InboxScreen(openFolder: (Folder, Inbox.Scope) -> Unit, openAccounts: () -> Unit) {
+fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) -> Unit, openAccounts: () -> Unit) {
     val scope = AppModel.scope
     val rooms = AppModel.rooms.values
     val logins = AppModel.loginIDs
@@ -107,7 +107,7 @@ fun InboxScreen(openFolder: (Folder, Inbox.Scope) -> Unit, openAccounts: () -> U
                     }
                     if (AppModel.initialSyncDone) {
                         items(list, key = { it.id }) { room ->
-                            ChatRow(room, showsMark = scope == Inbox.Scope.All && multiAccount, times)
+                            ChatRow(room, showsMark = scope == Inbox.Scope.All && multiAccount, times, Modifier.clickable { openThread(room.id) })
                             HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     } else {

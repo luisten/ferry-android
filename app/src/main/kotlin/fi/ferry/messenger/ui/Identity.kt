@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineHeightStyle
@@ -62,16 +64,18 @@ fun AccountMark(identity: AccountIdentity, size: Dp, ring: Dp = 0.dp, inverted: 
     }
 }
 
-/** Capsule with the mark and the name: section headers, banners. */
+/** Capsule with the mark and the name: section headers, the thread's header (`compact`), banners. */
 @Composable
-fun AccountTag(identity: AccountIdentity, modifier: Modifier = Modifier) {
+fun AccountTag(identity: AccountIdentity, modifier: Modifier = Modifier, compact: Boolean = false) {
     Row(
-        modifier.background(identity.color.wash, CircleShape).padding(start = 3.dp, end = 9.dp, top = 3.dp, bottom = 3.dp),
-        horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically,
+        modifier.background(identity.color.wash, CircleShape)
+            .padding(start = if (compact) 2.dp else 3.dp, end = if (compact) 7.dp else 9.dp, top = 2.dp, bottom = 2.dp)
+            .clearAndSetSemantics { contentDescription = "${identity.name} account" },
+        horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 5.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        AccountMark(identity, 16.dp)
-        Text(identity.name, color = identity.color.ink, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        AccountMark(identity, if (compact) 14.dp else 16.dp)
+        Text(identity.name, color = identity.color.ink, style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

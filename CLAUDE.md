@@ -7,11 +7,13 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A2 (2026-10-20): the inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card,
+**Status:** A3 (2026-10-21): the thread, read side (`ui/ThreadScreen.kt`: bubbles, group runs, replies, reactions,
+"Seen" and "Seen by", Instagram's own lines, the start block, older pages; media as labelled cards until A6). A2: the
+inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card,
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. Threads come with A3. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. Sending comes with A4. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -94,6 +96,10 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - Engine calls are blocking and can wait on the network: never on the main thread. `IGNextEvent` is polled on its own
   thread; everything the screens read changes on the main thread only (`AppModel`). Rooms are plain mutable objects:
   reading `AppModel.rooms` subscribes a screen, and the map is re-sent after each batch of updates.
+- **Opening a chat** calls `IGOpenChat` (a read, at most every 30 s, the engine decides) and `IGMarkRead` on open and
+  on each new message while it shows: the engine sends "Seen" only when the chat is unread and isn't a request. The
+  thread's list is laid out from the bottom (`reverseLayout`), so it opens on the newest message and older pages land
+  above it without moving it; its top item pages back (`IGOlder`, a read) only while it's on screen.
 - **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
   only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name. Glyphs are a few
   Material Icons path strings in `ui/Icons.kt`, not a library. Profile pictures load https only, in memory (`Pictures`).

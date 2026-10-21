@@ -15,6 +15,7 @@ import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.IG
 import fi.ferry.messenger.model.IGAdapter
 import fi.ferry.messenger.model.Inbox
+import fi.ferry.messenger.model.MessagesPage
 import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.UserProfile
 import fi.ferry.messenger.model.json
@@ -50,6 +51,8 @@ object AppModel {
     var scopeKey by mutableStateOf(""); private set
     /** Made-up data only (`Demo`): nothing connects. */
     var demo = false; private set
+    /** Chats with an older page on its way (the thread's top spinner). */
+    var paginating by mutableStateOf(setOf<String>()); private set
 
     /** The user every screen treats as "us", in every account's chats. */
     const val ME = IGAdapter.ME
@@ -146,6 +149,51 @@ object AppModel {
         // C6: every Instagram request since launch, per account and operation (`adb logcat -s ferry`). Counts and IDs only.
         Log.i("ferry", "requests ${IGCore.counts()?.decodeToString()}")
     }
+
+    // Thread (read side)
+
+    /** A chat opened: the engine reads it in full (reactions, edits, reply targets), at most every 30 s. A read. */
+    fun openThread(room: Room) {
+        if (demo || room.id !in rooms) return
+        thread { IGCore.openChat(room.id.encodeToByteArray()) }
+    }
+
+    /**
+     * The chat is on screen: "Seen" on their newest message, which the engine sends only when the chat is unread and
+     * isn't a request (core/chat rules.go); it reads here at once, as an update.
+     */
+    fun markRead(room: Room) {
+        if (demo || room.id !in rooms) return
+        thread { IGCore.markRead(room.id.encodeToByteArray()) }
+    }
+
+    /** One older page, prepended (a read). At the chat's start the engine says so with `IGAdapter.START_TOKEN`. */
+    fun loadOlder(room: Room) {
+        val cursor = room.prevBatch ?: return
+        if (room.reachedStart || room.id in paginating) return
+        if (cursor == IGAdapter.START_TOKEN || demo) {
+            room.prepend(MessagesPage(), cursor)
+            roomsState.value = roomsState.value
+            return
+        }
+        paginating = paginating + room.id
+        thread {
+            val text = IGCore.older(room.id.encodeToByteArray())?.decodeToString()
+            val page = text?.takeIf { runCatching { json.decodeFromString<Failure>(it).error }.getOrNull() == null }
+                ?.let { runCatching { json.decodeFromString<MessagesPage>(it) }.getOrNull() }
+            main.post {
+                paginating = paginating - room.id
+                if (page != null) {
+                    room.prepend(page, cursor)
+                    roomsState.value = roomsState.value
+                }
+            }
+        }
+    }
+
+    /** The contact's @handle: one of our own accounts, or Instagram's username from the chat's people. */
+    fun contactHandle(room: Room): String? =
+        Inbox.contactHandle(room, accounts) ?: Inbox.contactUserID(room, ME)?.let { profiles[it]?.handle }
 
     private fun connect(id: String) {
         val cookies = sessions.read(id) ?: return failed(id, "BAD_CREDENTIALS", "This phone can't read the saved login. Log in again.")

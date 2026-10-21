@@ -13,4 +13,7 @@ What changes for people who use the app, in plain words. The format is
 - Folders, top right: General (business and creator accounts), Requests and Archived. New message requests show as a
   card at the top of the list, with who's waiting but not what they wrote.
 - Search your chats by name.
+- Open a chat to read it: your messages in your account's colour, replies, reactions, edits, unsent messages, "Seen",
+  and in groups who wrote what and who has seen it. Scroll up for older messages. Photos, videos and voice messages
+  show as a label for now.
 - Your login stays on this phone, encrypted, and out of backups.
