@@ -66,6 +66,7 @@ fun FolderScreen(folder: Folder, scope: Inbox.Scope, openThread: (String) -> Uni
                 }
             }
             AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
+            AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
             if (AppModel.initialSyncDone && rooms.isEmpty()) {
                 EmptyFolder(folder, scope)
                 return@Column

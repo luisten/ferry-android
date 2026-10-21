@@ -272,8 +272,10 @@ object AppModel {
     /** Instagram keeps one reaction per person: the same emoji again removes ours, another replaces it. Never in a request. */
     fun react(key: String, message: Message, room: Room) {
         val target = message.eventID ?: return
-        val remove = message.reacted(key, ME)
-        perform(room) { IGCore.react(room.id.encodeToByteArray(), target.encodeToByteArray(), key.encodeToByteArray(), remove) }
+        // A removal names the key Instagram has ("❤" for the palette's "❤️"): with ours, Instagram kept the heart (A5 check).
+        val mine = message.reactions.firstOrNull { Message.Reaction.same(it.key, key) && ME in it.senders }
+        val emoji = (mine?.key ?: key).encodeToByteArray()
+        perform(room) { IGCore.react(room.id.encodeToByteArray(), target.encodeToByteArray(), emoji, mine != null) }
     }
 
     /** Our own text, within 15 minutes and 5 edits (the engine refuses otherwise; `Timeline.canEdit` hides the item). */

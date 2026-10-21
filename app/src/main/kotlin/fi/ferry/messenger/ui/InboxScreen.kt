@@ -116,6 +116,7 @@ fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) 
                 }
                 if (multiAccount) ScopeBar(scope)
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
+                AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
                 val times = rememberTimeFormats()
                 LazyColumn(Modifier.fillMaxSize()) {
                     if (newRequests.isNotEmpty()) {
