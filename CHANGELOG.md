@@ -28,4 +28,7 @@ What changes for people who use the app, in plain words. The format is
   reels and stories load when you tap them. Photos and videos sent together show as a pile you can open.
 - Send photos, videos and GIFs (the + in the message bar), and voice messages (tap the mic, or hold it). Where a photo
   was taken never leaves your phone: location and other details are removed first.
+- A welcome screen, and after each login a name, colour and mark for the account, so its chats are easy to tell apart.
+- Accounts: see each account's state, rename it or change its colour and mark, log in again when Instagram signs you
+  out (a banner and the chat say so), or remove an account from this phone.
 - Your login stays on this phone, encrypted, and out of backups.

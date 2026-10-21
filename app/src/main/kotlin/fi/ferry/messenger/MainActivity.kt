@@ -5,27 +5,21 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
+import fi.ferry.messenger.ui.AccountScreen
 import fi.ferry.messenger.ui.AccountsSheet
 import fi.ferry.messenger.ui.FerryTheme
 import fi.ferry.messenger.ui.FolderScreen
 import fi.ferry.messenger.ui.InboxScreen
+import fi.ferry.messenger.ui.NameAccountScreen
 import fi.ferry.messenger.ui.NewMessageScreen
+import fi.ferry.messenger.ui.ReloginDialog
 import fi.ferry.messenger.ui.ThreadScreen
+import fi.ferry.messenger.ui.Welcome
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -34,8 +28,11 @@ class MainActivity : ComponentActivity() {
         // Debug builds: `--ez demo true` shows made-up data only, and nothing connects (`Demo`); `--es request_room <room>`
         // has the engine treat that real chat as a request and hold back its sends (iOS's FERRY_DEBUG_AS_REQUEST).
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        AppModel.start(applicationContext, demo = debuggable && intent.getBooleanExtra("demo", false),
-            requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable })
+        // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska.
+        val demo = debuggable && intent.getBooleanExtra("demo", false)
+        AppModel.start(applicationContext, demo, requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable },
+            demoSignedOut = demo && intent.getBooleanExtra("signed_out", false))
+        if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
         setContent { FerryTheme { App() } }
     }
 
@@ -51,7 +48,9 @@ private sealed interface Screen {
     data object Inbox : Screen
     data class Folder(val folder: fi.ferry.messenger.model.Inbox.Folder, val scope: fi.ferry.messenger.model.Inbox.Scope) : Screen
     data class Thread(val room: String) : Screen
-    data object Login : Screen
+    /** O3, or A3 for `relogin`. */
+    data class Login(val relogin: String? = null) : Screen
+    data class Account(val id: String) : Screen
     data object NewMessage : Screen
 }
 
@@ -60,6 +59,7 @@ private sealed interface Screen {
 private fun App() {
     var stack by remember { mutableStateOf(listOf<Screen>(Screen.Inbox)) }
     var accountsOpen by remember { mutableStateOf(false) }
+    var reloginOf by remember { mutableStateOf<String?>(null) }
     fun push(screen: Screen) {
         stack = stack + screen
     }
@@ -68,13 +68,21 @@ private fun App() {
     }
 
     val screen = stack.last()
+    val naming = AppModel.naming
     when {
-        screen == Screen.Login -> LoginScreen { cookies ->
+        screen is Screen.Login -> LoginScreen { cookies ->
             pop()
-            cookies?.let(AppModel::login)
+            cookies?.let { AppModel.login(it, screen.relogin) }
         }
-        AppModel.accounts.isEmpty() -> Welcome { push(Screen.Login) }
-        screen is Screen.Thread -> ThreadScreen(screen.room, ::pop)
+        // O5, then O6: a new account gets its name, colour and mark before anything else.
+        naming != null && naming in AppModel.loginIDs -> NameAccountScreen(naming) { addAnother ->
+            AppModel.naming = null
+            if (addAnother) push(Screen.Login())
+        }
+        // The last account removed: what was open goes with it.
+        AppModel.accounts.isEmpty() -> Welcome { stack = listOf(Screen.Inbox, Screen.Login()) }
+        screen is Screen.Account -> AccountScreen(screen.id, ::pop) { reloginOf = it }
+        screen is Screen.Thread -> ThreadScreen(screen.room, ::pop) { reloginOf = it }
         screen is Screen.Folder -> FolderScreen(screen.folder, screen.scope, { push(Screen.Thread(it)) }, ::pop)
         // The chat it opens takes its place, ready to type (DESIGN N1).
         screen == Screen.NewMessage -> NewMessageScreen({ AppModel.focusComposer = it; stack = stack.dropLast(1) + Screen.Thread(it) }, ::pop)
@@ -82,26 +90,15 @@ private fun App() {
             openThread = { push(Screen.Thread(it)) },
             openFolder = { folder, scope -> push(Screen.Folder(folder, scope)) },
             openAccounts = { accountsOpen = true },
+            relogin = { reloginOf = it },
             newMessage = { push(Screen.NewMessage) },
         )
     }
-    if (accountsOpen) AccountsSheet(dismiss = { accountsOpen = false }, addAccount = { accountsOpen = false; push(Screen.Login) })
+    if (accountsOpen) AccountsSheet(
+        dismiss = { accountsOpen = false },
+        addAccount = { accountsOpen = false; push(Screen.Login()) },
+        open = { accountsOpen = false; push(Screen.Account(it)) },
+        relogin = { accountsOpen = false; reloginOf = it },
+    )
+    reloginOf?.let { id -> ReloginDialog(id, dismiss = { reloginOf = null }) { push(Screen.Login(relogin = id)) } }
 }
-
-/** No account yet (onboarding comes with A7): log in on instagram.com. */
-@Composable
-private fun Welcome(login: () -> Unit) {
-    Scaffold { padding ->
-        Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Ferry Messenger", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-            if (AppModel.connecting) Text("Connecting…")
-            AppModel.loginError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Button(login, enabled = !AppModel.connecting) { Text("Log in to Instagram") }
-            Text(
-                "Your password goes only to Instagram. Ferry Messenger keeps the session on this phone, encrypted.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-

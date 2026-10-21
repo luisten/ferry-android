@@ -57,6 +57,12 @@ object AppModel {
     var connecting by mutableStateOf(false); private set
     /** Why the last new login failed, in Instagram's or the engine's words. */
     var loginError by mutableStateOf<String?>(null); private set
+    /** A new account just connected: it's named next (O5, DESIGN §3.1). */
+    var naming by mutableStateOf<String?>(null)
+    /** Failed reconnects while no account is connected: two make the "Can't reach Instagram" banner. */
+    var syncFailures by mutableStateOf(0); private set
+    /** The banner "Later" put away; it comes back at the next launch, or when it changes. */
+    var hiddenBanner by mutableStateOf<Inbox.Banner?>(null)
     /** The inbox's scope: "" for All, else an account ID; kept across launches (DESIGN §4.1). */
     var scopeKey by mutableStateOf(""); private set
     /** Made-up data only (`Demo`): nothing connects. */
@@ -110,15 +116,17 @@ object AppModel {
     /** Our photos, GIFs, videos and voice notes on their way or failed, by transaction ID: Retry sends the same file. */
     private val outgoing = mutableMapOf<String, Attachment>()
     private var started = false
+    /** Accounts logged in by mistake while fixing another (A3): stopped, and their updates dropped. */
+    private val strangers = mutableSetOf<String>()
 
     /** Once per process: every stored account connects, an Instagram action each (index, mailbox, folders, socket). */
-    fun start(context: Context, demo: Boolean, requestRoom: String? = null) {
+    fun start(context: Context, demo: Boolean, requestRoom: String? = null, demoSignedOut: Boolean = false) {
         if (started) return
         started = true
         this.demo = demo
         MediaFiles.init(context)
         Outgoing.sweep(context)
-        if (demo) return loadDemo()
+        if (demo) return loadDemo(demoSignedOut)
         requestRoom?.let { IGCore.setDebug(false, it.encodeToByteArray()) }
         prefs = context.getSharedPreferences("ferry", Context.MODE_PRIVATE)
         sessions = Sessions(context)
@@ -135,9 +143,10 @@ object AppModel {
         ids.forEach(::connect)
     }
 
-    private fun loadDemo() {
+    /** `signedOut`: Kivo Studio needs a login (the banner, the thread's bar, A3). */
+    private fun loadDemo(signedOut: Boolean) {
         viewers += Demo.viewers
-        for (id in Demo.viewers.keys) statuses[id] = Status("CONNECTED", null, now())
+        for (id in Demo.viewers.keys) statuses[id] = Status(if (signedOut && id == Demo.KIVO) "BAD_CREDENTIALS" else "CONNECTED", null, now())
         roomsState.value = Demo.rooms(now()).associateByTo(mutableMapOf()) { it.id }
         profiles = Demo.profiles
         loaded += Demo.viewers.keys
@@ -145,8 +154,11 @@ object AppModel {
         updateInitialSync()
     }
 
-    /** The cookies the login web view collected (the user just logged in): a new account, or a fresh session. */
-    fun login(cookies: Map<String, String>) {
+    /**
+     * The cookies the login web view collected (the user just logged in): a new account, or a fresh session for
+     * `relogin` (A3). Finishing as a different account than the one being fixed is refused, with who to log in as.
+     */
+    fun login(cookies: Map<String, String>, relogin: String? = null) {
         connecting = true
         loginError = null
         val payload = json.encodeToString(cookies).encodeToByteArray()
@@ -154,9 +166,39 @@ object AppModel {
             val result = IGCore.login(payload)
             main.post {
                 connecting = false
-                connected(null, result)
+                connected(null, result, relogin)
             }
         }
+    }
+
+    /**
+     * Remove Account (A2): its session, its client and its chats leave this phone. Instagram isn't told, so the web
+     * session stays in Instagram's "Where you're logged in" until it expires or is removed there.
+     */
+    fun removeAccount(id: String) {
+        if (!demo) {
+            thread { IGCore.stop(id.encodeToByteArray()) }
+            sessions.delete(id)
+        }
+        statuses -= id
+        running -= id
+        loaded -= id
+        waiting -= id
+        viewers -= id
+        write(VIEWERS, viewers)
+        roomsState.value.values.removeAll { it.bridge?.receiver == id }
+        identities = identities - id
+        write(IDENTITIES, identities)
+        if (scopeKey == id) selectScope(Inbox.Scope.All)
+        updateAccounts()
+        updateInitialSync()
+        refresh()
+    }
+
+    /** An identity edited in O5 or A2, already checked (`AccountIdentity.problems`). */
+    fun setIdentity(id: String, identity: AccountIdentity) {
+        identities = identities + (id to identity.copy(name = identity.name.trim()))
+        write(IDENTITIES, identities)
     }
 
     fun selectScope(scope: Inbox.Scope) {
@@ -505,12 +547,12 @@ object AppModel {
     }
 
     /** IGLogin's or IGResume's answer: the account (its first page's chats come as updates up to `seq`), or why not. */
-    private fun connected(resumed: String?, result: ByteArray?) {
+    private fun connected(resumed: String?, result: ByteArray?, relogin: String? = null) {
         val text = result?.decodeToString()
         val failure = text?.let { runCatching { json.decodeFromString<Failure>(it) }.getOrNull() }
         if (text == null || failure?.error != null) {
             val message = failure?.error ?: "The engine returned nothing."
-            if (resumed == null) loginError = message
+            if (resumed == null) loginFailed(message)
             else {
                 running -= resumed
                 failed(resumed, failure?.code ?: "UNKNOWN_ERROR", message)
@@ -519,6 +561,19 @@ object AppModel {
         }
         val login = json.decodeFromString<IG.Login>(text)
         val id = login.account
+        if (relogin != null && id != relogin) {
+            if (id !in statuses) { // a stranger; one of ours just got a fresh session
+                strangers += id
+                thread { IGCore.stop(id.encodeToByteArray()) }
+                roomsState.value.values.removeAll { it.bridge?.receiver == id }
+                refresh()
+            }
+            val wanted = accounts.firstOrNull { it.id == relogin }?.profile?.username?.let { "@$it" } ?: "the account you're fixing"
+            return loginFailed("That was @${login.viewer.username ?: "another account"}. Log in as $wanted to fix it.")
+        }
+        strangers -= id
+        val isNew = resumed == null && id !in statuses
+        syncFailures = 0
         running += id
         viewers[id] = login.viewer
         write(VIEWERS, viewers)
@@ -527,10 +582,19 @@ object AppModel {
         val seq = login.seq ?: 0
         if (seq <= appliedSeq) loaded += id else waiting[id] = seq
         updateInitialSync()
+        if (isNew) naming = id
     }
 
+    /** On Welcome when there's no account yet, else as the screen's notice. */
+    private fun loginFailed(message: String) {
+        loginError = message
+        if (accounts.isNotEmpty()) actionError = message
+    }
+
+    /** A connection that failed; after a passing one the engine tries again every 30 s by itself (`Login`, `LoginFailed`). */
     private fun failed(id: String, code: String, message: String?) {
         setStatus(id, code, message)
+        if (code == "TRANSIENT_DISCONNECT" && statuses.values.none { it.state == "CONNECTED" }) syncFailures++
         loaded += id
         updateInitialSync()
     }
@@ -591,8 +655,12 @@ object AppModel {
     private fun handle(update: IG.Update) {
         update.seq?.let { appliedSeq = maxOf(appliedSeq, it) }
         val id = update.account ?: return
+        if (id in strangers) return
         when (update.kind) {
-            "Connected" -> setStatus(id, "CONNECTED")
+            "Connected" -> {
+                syncFailures = 0
+                setStatus(id, "CONNECTED")
+            }
             "Disconnected" -> setStatus(id, "TRANSIENT_DISCONNECT", update.error)
             "AuthError" -> setStatus(id, update.code ?: "BAD_CREDENTIALS", update.error)
             "Login" -> update.viewer?.let { // a stored account's retry got through

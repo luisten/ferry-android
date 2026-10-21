@@ -73,7 +73,13 @@ import java.time.ZoneId
 
 /** I1, the inbox (DESIGN §4, I1): account stack, title, Folders menu, scope bar, the Requests card, chat rows. */
 @Composable
-fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) -> Unit, openAccounts: () -> Unit, newMessage: () -> Unit) {
+fun InboxScreen(
+    openThread: (String) -> Unit,
+    openFolder: (Folder, Inbox.Scope) -> Unit,
+    openAccounts: () -> Unit,
+    newMessage: () -> Unit,
+    relogin: (String) -> Unit,
+) {
     val scope = AppModel.scope
     val rooms = AppModel.rooms.values
     val logins = AppModel.loginIDs
@@ -115,6 +121,9 @@ fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) 
                     SearchBar(query!!, if (identity != null) "Search ${identity.name}" else "Search", { query = it }, { query = null })
                 }
                 if (multiAccount) ScopeBar(scope)
+                // Offline waits for the first sync's own "can't reach" (none yet): a banner over an empty list says less.
+                Inbox.banner(AppModel.syncFailures, AppModel.accounts)?.takeIf { it != AppModel.hiddenBanner && (it != Inbox.Banner.Offline || AppModel.initialSyncDone) }
+                    ?.let { ConnectionBanner(it, openAccounts, relogin) }
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
                 val times = rememberTimeFormats()

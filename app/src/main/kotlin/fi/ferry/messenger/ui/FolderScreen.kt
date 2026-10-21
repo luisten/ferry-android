@@ -6,32 +6,24 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -123,38 +115,5 @@ private fun EmptyFolder(folder: Folder, scope: Inbox.Scope) {
         }
         Folder.GENERAL -> Empty(Icons.general, "Nothing in General", "On Instagram, business and creator accounts can move chats here.")
         else -> Empty(Icons.archive, "No archived chats", "Archived chats come back when there's a new message.")
-    }
-}
-
-/** A1, for now: your accounts with their state, and "Add account". Editing and removing come with A7. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AccountsSheet(dismiss: () -> Unit, addAccount: () -> Unit) {
-    ModalBottomSheet(dismiss, containerColor = MaterialTheme.colorScheme.background) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-            Text("Accounts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(12.dp))
-            for (login in AppModel.orderedAccounts) {
-                val identity = AppModel.identities[login.id]
-                val health = login.health
-                val name = identity?.name ?: login.displayName
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                        .clearAndSetSemantics { contentDescription = listOfNotNull(name, login.profile?.username?.let { "@$it" }, health.label).joinToString(", ") },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box { AccountAvatar(identity, login.profile?.avatar, name, 44.dp); if (identity != null) Box(Modifier.align(Alignment.BottomEnd)) { AccountMark(identity, 18.dp, ring = 2.dp) } }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(listOfNotNull(login.profile?.username?.let { "@$it" }, health.label).joinToString(" · "),
-                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (health.needsUser) Icon(Icons.warning, null, Modifier.size(20.dp), tint = Status.warn)
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Button(addAccount, Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors()) { Text("Add account") }
-        }
     }
 }

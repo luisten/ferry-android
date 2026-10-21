@@ -111,7 +111,7 @@ private val GROUP_INDENT = GROUP_AVATAR + 6.dp
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ThreadScreen(roomID: String, back: () -> Unit) {
+fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     BackHandler(onBack = back)
     val room = AppModel.rooms[roomID]
     if (room == null) {
@@ -154,7 +154,6 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     }
     var confirmingDelete by remember(roomID) { mutableStateOf(false) }
     val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
-    // ponytail: SIGNED_OUT keeps the composer (a send fails with its reason) until A7's "Log in again" bar.
     val bar = Inbox.threadBar(room, login?.health, replyingInstead)
     val actions = MessageActions(
         react = { key, message -> AppModel.react(key, message, room) },
@@ -215,7 +214,9 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            if (bar == Inbox.ThreadBar.REQUEST) {
+            if (bar == Inbox.ThreadBar.SIGNED_OUT && login != null) {
+                RecoveryBar(identity?.name ?: login.displayName) { relogin(login.id) }
+            } else if (bar == Inbox.ThreadBar.REQUEST) {
                 RequestBar(AppModel.contactHandle(room)?.let { "@$it" } ?: room.name, identity,
                     accept = { AppModel.accept(room) }, delete = { confirmingDelete = true }, replyInstead = { replyingInstead = true })
             } else {

@@ -15,7 +15,10 @@ enum class AccountColor(val fill: Long, val darkInk: Long) {
     BERRY(0xFFC2255C, 0xFFF27DA6),
     MOSS(0xFF4D7C0F, 0xFFA3CF5F),
     COCOA(0xFF8A5A2B, 0xFFD6A877),
-    SLATE(0xFF475B78, 0xFFA9B8CF),
+    SLATE(0xFF475B78, 0xFFA9B8CF);
+
+    /** "Ocean": the swatch's name in the editor's footer ("Ocean is used by Studio."). */
+    val label: String get() = name.lowercase().replaceFirstChar { it.uppercase() }
 }
 
 /**
@@ -49,5 +52,93 @@ data class AccountIdentity(val name: String, val color: AccountColor, val mark: 
             }
             return result
         }
+
+        /** The scope bar's order after a drag in Accounts: `ids` in their new order; identities not listed keep theirs. */
+        fun reordered(identities: Map<String, AccountIdentity>, ids: List<String>): Map<String, AccountIdentity> {
+            val result = identities.toMutableMap()
+            ids.forEachIndexed { index, id -> result[id]?.let { result[id] = it.copy(order = index) } }
+            return result
+        }
+
+        // Editing (O5, A2; DESIGN §3.1, §3.6 rule 1: no two accounts share a colour, mark or name)
+
+        /** What stops `draft` from being saved for `loginID`, given every account's identity (its own included). */
+        fun problems(draft: AccountIdentity, loginID: String, identities: Map<String, AccountIdentity>): List<Problem> {
+            val others = identities.filterKeys { it != loginID }.values.sortedBy { it.order }
+            val name = draft.name.trim()
+            val problems = mutableListOf<Problem>()
+            if (name.isEmpty()) problems += Problem.NameEmpty
+            else others.firstOrNull { it.name.trim().equals(name, ignoreCase = true) }?.let { problems += Problem.NameTaken(it.name) }
+            if (draft.mark.isEmpty()) problems += Problem.MarkEmpty
+            else others.firstOrNull { it.mark.uppercase() == draft.mark.uppercase() }?.let { problems += Problem.MarkTaken(it.name) }
+            others.firstOrNull { it.color == draft.color }?.let { problems += Problem.ColorTaken(it.name) }
+            return problems
+        }
+
+        /** The account already using `color`, if it isn't `loginID` (taken swatches show its mark, DESIGN O5). */
+        fun owner(color: AccountColor, excluding: String, identities: Map<String, AccountIdentity>): AccountIdentity? =
+            identities.entries.firstOrNull { it.key != excluding && it.value.color == color }?.value
+
+        /** One grapheme: the last one typed, as a capital if it's a letter ("ß" uppercases to two letters: kept). */
+        fun normalizedMark(text: String): String {
+            val last = graphemes(text.trim()).lastOrNull() ?: return ""
+            val upper = last.uppercase()
+            return if (graphemes(upper).size == 1 && upper.length == last.length) upper else last
+        }
+
+        /**
+         * Mark chips (DESIGN O5): the first distinct letters of the name, then a few emoji, minus marks already taken. No
+         * camera: next to "Instagram" it was the one Instagram-like glyph in the app (review 2026-10-15 #12).
+         */
+        fun markSuggestions(name: String, taken: Set<String>): List<String> {
+            val letters = mutableListOf<String>()
+            for (letter in name.uppercase().filter { it.isLetter() }.map { it.toString() }) {
+                if (letter !in letters && letter !in taken) letters += letter
+            }
+            return letters.take(3) + listOf("✦", "⛵️", "🌊").filter { it !in taken }
+        }
+
+        /** Name chips (DESIGN O5): the Instagram name, then common labels, minus names already taken. */
+        fun nameSuggestions(instagramName: String?, taken: Set<String>): List<String> {
+            val candidates = listOfNotNull(instagramName?.take(MAX_NAME_LENGTH)) + listOf("Personal", "Work", "Studio", "Shop", "Creator")
+            val lowered = taken.map { it.lowercase() }.toSet()
+            val result = mutableListOf<String>()
+            for (name in candidates) if (name.lowercase() !in lowered && name !in result) result += name
+            return result.take(4)
+        }
+
+        private fun graphemes(text: String): List<String> {
+            val it = java.text.BreakIterator.getCharacterInstance().apply { setText(text) }
+            val out = mutableListOf<String>()
+            var start = it.first()
+            var end = it.next()
+            while (end != java.text.BreakIterator.DONE) {
+                out += text.substring(start, end)
+                start = end
+                end = it.next()
+            }
+            return out
+        }
+    }
+
+    sealed interface Problem {
+        data object NameEmpty : Problem
+        /** The other account's name. */
+        data class NameTaken(val by: String) : Problem
+        data object MarkEmpty : Problem
+        data class MarkTaken(val by: String) : Problem
+        data class ColorTaken(val by: String) : Problem
+
+        val isAboutName: Boolean get() = this is NameEmpty || this is NameTaken
+        val isAboutMark: Boolean get() = this is MarkEmpty || this is MarkTaken
+
+        val message: String
+            get() = when (this) {
+                NameEmpty -> "Give this account a name."
+                is NameTaken -> "$by already uses this name."
+                MarkEmpty -> "Pick a letter or an emoji."
+                is MarkTaken -> "$by already uses this mark."
+                is ColorTaken -> "$by already uses this color."
+            }
     }
 }

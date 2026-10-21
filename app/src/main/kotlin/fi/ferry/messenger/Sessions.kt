@@ -27,6 +27,11 @@ class Sessions(context: Context) {
         cipher(Cipher.DECRYPT_MODE, GCMParameterSpec(128, file, 0, IV)).doFinal(file, IV, file.size - IV)
     }.getOrNull()
 
+    /** Remove Account: the session goes from this phone. */
+    fun delete(account: String) {
+        AtomicFile(File(dir, account)).delete()
+    }
+
     fun write(account: String, session: ByteArray) {
         val cipher = cipher(Cipher.ENCRYPT_MODE, null)
         val file = AtomicFile(File(dir, account))

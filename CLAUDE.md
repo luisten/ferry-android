@@ -7,7 +7,9 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A6 (2026-10-22): media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
+**Status:** A7 (2026-10-22): accounts (`ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
+another account?" after the first, the identity editor, each account's page with Remove Account, the signed-out
+prompt and bar, the inbox's banner; `AppModel.login(relogin)` refuses a different account); demo only. A6: media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
 video", post and voice cards, the full-screen viewer; `MediaFiles` the download cache; `Outgoing` getting a pick ready;
 `VoiceRecorder`, `VoicePlayer`); checked on the demo only. A5 (2026-10-21): requests (`RequestBar`: Accept, Delete, "Reply instead"), Archive and Unarchive (this
 phone only), New Message (`ui/NewMessageScreen.kt`: From account, Instagram's people search, the DM); checked live,
@@ -20,7 +22,7 @@ inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. Onboarding, account health and Remove Account come with A7. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. Notifications (E8, the user's call) and a real phone come with A8. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -117,6 +119,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **A request** shows `RequestBar` instead of the composer (`Inbox.threadBar`). Accept and Delete are optimistic
   (`Room.requestAction`: the chat moves or hides at once) and undone with a notice if the engine refuses; a Delete's
   room then goes with the engine's `RoomRemoved`. "Reply instead" sends through the engine, which accepts first.
+- **Accounts** (A7, the iOS app's rules and copy): an identity (name, colour, mark) can't share any of the three with
+  another account (`AccountIdentity.problems`, tested); a new login is named first (`AppModel.naming`). Re-login
+  goes through the same web view with the account to fix (`login(cookies, relogin)`): another account that isn't
+  ours is stopped, its updates dropped, and the user told who to log in as. Remove Account stops its client
+  (`IGStop`), deletes its session and identity and drops its chats; its archive and Requests markers stay, hidden.
+  Health: `Inbox.banner` (offline after 2 failed connects with none connected, else the account in trouble),
+  "Later" hides it until it changes; a signed-out account's chats get `RecoveryBar` instead of the composer.
+  Demo switches: `--ez signed_out true` (Kivo signed out), `--ez naming true` (O5 for Tamo).
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
   SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told.
 - **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,
@@ -184,6 +194,9 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   an install can leave a corrupt APK: the package vanishes at the next boot, its data stays; reinstall (same uid),
   and `adb shell sync` after installs. After a crash the emulator shows a dialog asking to send Google the report
   and waits: boot with `-crash-report-mode never -no-metrics`.
+- **The emulator's 2 GB can't hold it all** (system services, the app with Media3, the engine): it swaps and Android's
+  own system process stops responding ("Process system isn't responding", an AlarmManager lock in the trace, the
+  time spent waiting to run ten times the running). Boot with `-memory 3072` (a boot option; the AVD stays at 2 GB).
 - **A composable that handles a press must stay in composition until the release**: swapping the composer for the
   recording strip on press removed the mic button and its gesture, so a hold never saw its release.
 - Kotlin can't alias a nested enum or sealed type with a `val` (`val p = Timeline.GroupPosition`): import its values.
