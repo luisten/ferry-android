@@ -157,7 +157,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **Instagram echoes "❤" for "❤️"** (it drops the emoji variation selector U+FE0F): compare reaction keys with
   `Message.Reaction.same`, never `==`, or our own heart isn't ours and choosing it again re-reacts (iOS fixed the
   same in luisten/ferry-messenger#10). A removal must name Instagram's key: `IGReact` with "❤️" left its "❤" in
-  place (a fresh load still had it, 2026-10-21), so `AppModel.react` sends the stored key. Not yet checked live.
+  place (a fresh load still had it, 2026-10-21), so `AppModel.react` sends the stored key: checked live, the heart
+  went and a fresh load agreed.
 - **A removal echo for a reaction loaded with the thread isn't matched** (engine): Instagram names it by its log ID,
   the engine's history reactions are `<msg>~react<fbid>`, so the screen keeps it until a fresh load. Fixed in
   core/chat by luisten/ferry-messenger#10 (one such reaction on the message: redacted); comes with the next pin.
