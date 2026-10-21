@@ -77,7 +77,7 @@ object Demo {
             c.lines.map { Triple(it.fromMe, now - it.minutesAgo * 60_000, it.text) }) } +
         requests.mapIndexed { i, r -> dm("!debug-request-${i + 1}", r.name, r.fbid, r.account, request = true, r.unread,
             r.texts.mapIndexed { j, t -> Triple(false, now - r.minutesAgo * 60_000 + j * 40_000, t) }) } +
-        group(now)
+        group(now) + media(now)
 
     /** The engine's `m.bridge` (core/chat): whose chat, with whom, a DM or (no room type) a group. */
     private fun bridge(name: String, channel: String, account: String, request: Boolean, dm: Boolean): JsonElement = buildJsonObject {
@@ -151,6 +151,52 @@ object Demo {
             putJsonObject("\$debug-group-msg-7") { putJsonObject("m.read") { put(maya, read(10.0)); put(sam, read(5.0)) } }
         }
         return room("!debug-group", events, unread = 1, receipts = Event("m.receipt", receipts))
+    }
+
+    /**
+     * One chat of media in the engine's shapes (core/chat): an album, a voice note, a reel to load, a video, a GIPHY
+     * sticker. Their links go nowhere (`example.invalid`), so the cards show their layout and a failed download.
+     */
+    private fun media(now: Long): Room {
+        val mira = "17841400000000205"
+        val ghost = IGAdapter.user(mira)
+        val cdn = "https://scontent.example.invalid/v/demo"
+        fun photo(n: Int, w: Int, h: Int) = buildJsonObject {
+            put("msgtype", "m.image"); put("body", ""); put("url", "$cdn-photo-$n.jpg")
+            putJsonObject("info") { put("mimetype", "image/jpeg"); put("w", w); put("h", h) }
+        }
+        val album = listOf(photo(1, 1080, 1350), photo(2, 1350, 1080), photo(3, 1080, 1080))
+        val start = now - 90 * 60_000
+        val parts = listOf<Triple<Boolean, Long, Map<String, JsonElement>>>(
+            Triple(false, 80, (album[0] as kotlinx.serialization.json.JsonObject) + mapOf("fi.ferry.album" to kotlinx.serialization.json.JsonArray(album))),
+            Triple(false, 78, buildJsonObject {
+                put("msgtype", "m.audio"); put("body", ""); put("url", "$cdn-voice.m4a")
+                putJsonObject("info") { put("mimetype", "audio/mp4"); put("duration", 12_500) }
+                putJsonObject("org.matrix.msc3245.voice") {}
+            }),
+            Triple(false, 60, buildJsonObject {
+                put("msgtype", "m.video"); put("body", ""); put("external_url", "https://www.instagram.com/reel/DEMO123/")
+                putJsonObject("info") { put("thumbnail_url", "$cdn-reel-preview.jpg") }
+                putJsonObject("com.beeper.unresolved_media") { put("target_url", "https://www.instagram.com/reel/DEMO123/"); put("target_id", "1") }
+            }),
+            Triple(true, 30, buildJsonObject {
+                put("msgtype", "m.video"); put("body", ""); put("url", "$cdn-video.mp4")
+                putJsonObject("info") { put("mimetype", "video/mp4"); put("w", 1080); put("h", 1920); put("duration", 8_000); put("thumbnail_url", "$cdn-video-preview.jpg") }
+            }),
+            Triple(false, 6, buildJsonObject {
+                put("msgtype", "m.image"); put("body", ""); put("url", "$cdn-sticker.webp"); put("fi.ferry.sticker", true)
+                putJsonObject("info") { put("mimetype", "image/webp"); put("fi.mau.gif", true); put("w", 200); put("h", 200); put("thumbnail_url", "$cdn-sticker.jpg") }
+            }),
+        )
+        val events = listOf(
+            state("m.bridge", "instagram", bridge("Mira Holt", mira, TAMO, request = false, dm = true), start),
+            state("m.room.name", "", buildJsonObject { put("name", "Mira Holt") }, start),
+            state("m.room.member", ghost, member("Mira Holt"), start, ghost),
+        ) + parts.mapIndexed { j, (fromMe, minutesAgo, content) ->
+            Event("m.room.message", kotlinx.serialization.json.JsonObject(content), "\$debug-media-$j", if (fromMe) IGAdapter.ME else ghost,
+                originServerTS = now - minutesAgo * 60_000)
+        }
+        return room("!debug-demo-media", events, unread = 0)
     }
 
     private fun room(id: String, events: List<Event>, unread: Int, receipts: Event? = null) = Room(id).apply {

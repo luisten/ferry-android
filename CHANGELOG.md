@@ -24,4 +24,8 @@ What changes for people who use the app, in plain words. The format is
 - New message: choose which of your accounts it's from, search Instagram for someone and start the chat.
 - Stickers and GIFs from Instagram's GIPHY picker are named as such, instead of "a message Ferry can't show".
 - A chat that opens unread shows where the new messages start, even when only the newest has arrived.
+- Photos, videos, GIFs, stickers and voice messages show in the chat; tap one to see it full screen or play it. Shared
+  reels and stories load when you tap them. Photos and videos sent together show as a pile you can open.
+- Send photos, videos and GIFs (the + in the message bar), and voice messages (tap the mic, or hold it). Where a photo
+  was taken never leaves your phone: location and other details are removed first.
 - Your login stays on this phone, encrypted, and out of backups.

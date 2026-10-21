@@ -18,19 +18,21 @@ import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessagesPage
 import fi.ferry.messenger.model.PendingMessage
-import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.Room
+import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.UserProfile
 import fi.ferry.messenger.model.get
 import fi.ferry.messenger.model.json
 import fi.ferry.messenger.model.long
+import fi.ferry.messenger.model.string
+import fi.ferry.messenger.ui.Pictures
+import kotlin.concurrent.thread
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import kotlin.concurrent.thread
 
 /**
  * App root state (the iOS app's AppModel, as far as A2 goes): the Instagram accounts (each one's session in
@@ -105,6 +107,8 @@ object AppModel {
      * (`Inbox.folder`), so a new message still brings the chat back.
      */
     private var archived = mapOf<String, Long>()
+    /** Our photos, GIFs, videos and voice notes on their way or failed, by transaction ID: Retry sends the same file. */
+    private val outgoing = mutableMapOf<String, Attachment>()
     private var started = false
 
     /** Once per process: every stored account connects, an Instagram action each (index, mailbox, folders, socket). */
@@ -112,6 +116,8 @@ object AppModel {
         if (started) return
         started = true
         this.demo = demo
+        MediaFiles.init(context)
+        Outgoing.sweep(context)
         if (demo) return loadDemo()
         requestRoom?.let { IGCore.setDebug(false, it.encodeToByteArray()) }
         prefs = context.getSharedPreferences("ferry", Context.MODE_PRIVATE)
@@ -261,12 +267,16 @@ object AppModel {
         if (message.status !is Message.Status.Failed || message.eventID != null) return
         val pending = room.pending.firstOrNull { it.txnID == txnID } ?: return
         update(room, txnID, PendingMessage.State.Sending)
-        deliver(pending, room)
+        if (txnID in outgoing) deliverMedia(pending, room) else deliver(pending, room)
     }
 
     /** Drops a failed local echo that never reached Instagram. */
     fun discard(message: Message, room: Room) {
-        if (message.eventID == null) message.txnID?.let { room.removePending(it); refresh() }
+        if (message.eventID == null) message.txnID?.let {
+            room.removePending(it)
+            outgoing.remove(it)?.file?.delete()
+            refresh()
+        }
     }
 
     /** Instagram keeps one reaction per person: the same emoji again removes ours, another replaces it. Never in a request. */
@@ -380,16 +390,100 @@ object AppModel {
             val found = answer?.let { runCatching { json.decodeFromString<IG.Result>(it) }.getOrNull() }
             main.post {
                 val room = found?.room
-                when {
-                    error != null || room == null -> done(null, error ?: "The engine found no chat.")
-                    (found.seq ?: 0) <= appliedSeq -> done(room, null)
-                    else -> seqWaiters += (found.seq ?: 0) to { done(room, null) }
-                }
+                if (error != null || room == null) done(null, error ?: "The engine found no chat.") else afterSeq(found.seq ?: 0) { done(room, null) }
             }
         }
     }
 
-    fun accountName(room: Room): String =room.bridge?.receiver?.let { identities[it]?.name } ?: "your chats"
+    // Media (A6)
+
+    /**
+     * A photo, GIF or video `Outgoing` prepared, or a voice note: a local echo at once (`local:<id>`, its preview
+     * seeded), then Instagram's upload. Never in a request (the composer has no attachments there).
+     */
+    fun sendMedia(attachment: Attachment, replyTo: String?, room: Room) {
+        val voice = attachment.kind == Attachment.Kind.VOICE
+        val txnID = newOTID()
+        val local = LOCAL + txnID
+        val content = buildJsonObject {
+            put("msgtype", if (voice) "m.audio" else if (attachment.kind == Attachment.Kind.VIDEO) "m.video" else "m.image")
+            put("body", "")
+            put("url", local)
+            putJsonObject("info") {
+                put("mimetype", attachment.mimetype)
+                if (attachment.width > 0) { put("w", attachment.width); put("h", attachment.height) }
+                attachment.duration?.let { put("duration", it) }
+                if (attachment.kind == Attachment.Kind.GIF) put("fi.mau.gif", true)
+                if (attachment.kind == Attachment.Kind.VIDEO) put("thumbnail_url", local)
+            }
+            if (voice) putJsonObject("org.matrix.msc3245.voice") {}
+            if (replyTo != null) putJsonObject("m.relates_to") { putJsonObject("m.in_reply_to") { put("event_id", replyTo) } }
+        }
+        attachment.preview?.let { Pictures.seed(local, it) }
+        outgoing[txnID] = attachment
+        val pending = PendingMessage(txnID, content, now(), PendingMessage.State.Sending)
+        room.addPending(pending)
+        refresh()
+        deliverMedia(pending, room)
+    }
+
+    private fun deliverMedia(pending: PendingMessage, room: Room) {
+        val attachment = outgoing[pending.txnID] ?: return update(room, pending.txnID, PendingMessage.State.Failed("The file is gone. Send it again."))
+        if (demo || room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
+        val voice = pending.content["msgtype"].string == "m.audio"
+        val replyTo = Timeline.replyTarget(pending.content).orEmpty()
+        thread {
+            val answer = IGCore.sendMedia(room.id.encodeToByteArray(), attachment.file.path.encodeToByteArray(), attachment.mimetype.encodeToByteArray(),
+                voice, replyTo.encodeToByteArray(), pending.txnID.encodeToByteArray())?.decodeToString()
+            val failure = failure(answer)
+            main.post { update(room, pending.txnID, if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(pending.txnID)) }
+        }
+    }
+
+    /** A local echo's file (`local:<id>`): the viewer opens it before Instagram has it. */
+    fun localFile(url: String): java.io.File? = outgoing[url.removePrefix(LOCAL)]?.file?.takeIf { url.startsWith(LOCAL) }
+
+    /** Our upload's echo: its file goes into the media cache under Instagram's link, so it isn't fetched back. */
+    private fun fileSent(events: List<fi.ferry.messenger.model.Event>) {
+        for (event in events) {
+            val txnID = event.unsigned?.transactionID ?: continue
+            val attachment = outgoing.remove(txnID) ?: continue
+            val url = event.content["url"].string ?: continue
+            val mimetype = event.content["info"]["mimetype"].string
+            thread {
+                MediaFiles.adopt(attachment.file, url, mimetype)
+                attachment.file.delete()
+            }
+        }
+    }
+
+    /**
+     * "Load video": a share's reel, story or post read in full (a read, so requests allow it). Its link and size come as
+     * a hidden edit; `done` runs once that's in, or with why not.
+     */
+    fun resolveMedia(message: Message, room: Room, done: (error: String?) -> Unit) {
+        val id = message.eventID ?: return done("This message isn't on Instagram yet.")
+        if (demo || room.id !in rooms) return done("This is the demo: nothing is loaded.")
+        thread {
+            val answer = IGCore.resolveMedia(room.id.encodeToByteArray(), id.encodeToByteArray())?.decodeToString()
+            val error = failure(answer)
+            val seq = answer?.let { runCatching { json.decodeFromString<IG.Result>(it).seq }.getOrNull() } ?: 0
+            main.post { if (error != null) done(error) else afterSeq(seq) { done(null) } }
+        }
+    }
+
+    /** A media link that stopped working (they last 33 h to 30 days): the thread is read again for fresh ones. */
+    fun refreshMedia(room: Room) {
+        if (demo || room.id !in rooms) return
+        thread { IGCore.readChat(room.id.encodeToByteArray()) }
+    }
+
+    /** `go` once the engine's updates up to `seq` are applied. */
+    private fun afterSeq(seq: Long, go: () -> Unit) {
+        if (seq <= appliedSeq) go() else seqWaiters += seq to go
+    }
+
+    fun accountName(room: Room): String = room.bridge?.receiver?.let { identities[it]?.name } ?: "your chats"
 
     /** The screens read the rooms again (after a change inside one). */
     private fun refresh() {
@@ -522,6 +616,7 @@ object AppModel {
             rooms[id] = it
         } else return
         IGAdapter.apply(update, room)
+        if (outgoing.isNotEmpty()) update.update?.timeline?.events?.let(::fileSent)
         archived[id]?.let { if (Inbox.ARCHIVED_TAG !in room.tags) room.tags = room.tags + (Inbox.ARCHIVED_TAG to archiveTag(it)) }
         update.profiles?.let { profiles = profiles + it }
     }
@@ -542,4 +637,5 @@ object AppModel {
     private const val VIEWERS = "viewers"
     private const val SCOPE = "inbox.scope"
     private const val ARCHIVED = "archived"
+    private const val LOCAL = "local:"
 }

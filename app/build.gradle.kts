@@ -30,5 +30,9 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0") // the engine's JSON, as Swift's Codable
+    // Video and voice playback, and shrinking videos over Instagram's 25 MB before sending (A6, the user's choice).
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-ui-compose:1.11.1")
+    implementation("androidx.media3:media3-transformer:1.11.1")
     testImplementation("junit:junit:4.13.2") // tests only, never in the app
 }

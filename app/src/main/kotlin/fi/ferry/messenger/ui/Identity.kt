@@ -153,9 +153,16 @@ fun identityOf(room: Room): AccountIdentity? = room.bridge?.receiver?.let { AppM
 object Pictures {
     // ponytail: memory only, one download per launch and size; a disk cache when pictures (A6) need one.
     private val cache = LruCache<String, ImageBitmap>(200)
+    /** Our own pictures before Instagram has them (`local:<id>`, a local echo's preview). */
+    private val seeded = HashMap<String, ImageBitmap>()
+
+    fun seed(url: String, image: ImageBitmap) {
+        seeded[url] = image
+    }
 
     @Composable
     fun load(url: String?, px: Int): ImageBitmap? {
+        url?.let { seeded[it] }?.let { return it }
         val key = url?.let { "$px:$it" }
         val image by produceState(key?.let(cache::get), key) {
             if (value == null && key != null && url.startsWith("https://")) {
@@ -166,6 +173,7 @@ object Pictures {
     }
 
     private fun fetch(url: String, px: Int): ImageBitmap? = runCatching {
+        fi.ferry.messenger.MediaFiles.cachedImage(url)?.let { return decode(it.readBytes(), px) }
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 15_000
         connection.readTimeout = 15_000
@@ -176,6 +184,10 @@ object Pictures {
             connection.disconnect()
         }
         if (bytes.size > MAX_BYTES) return null
+        decode(bytes, px)
+    }.getOrNull()
+
+    private fun decode(bytes: ByteArray, px: Int): ImageBitmap? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         var sample = 1

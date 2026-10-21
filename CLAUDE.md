@@ -7,7 +7,9 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A5 (2026-10-21): requests (`RequestBar`: Accept, Delete, "Reply instead"), Archive and Unarchive (this
+**Status:** A6 (2026-10-22): media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
+video", post and voice cards, the full-screen viewer; `MediaFiles` the download cache; `Outgoing` getting a pick ready;
+`VoiceRecorder`, `VoicePlayer`); checked on the demo only. A5 (2026-10-21): requests (`RequestBar`: Accept, Delete, "Reply instead"), Archive and Unarchive (this
 phone only), New Message (`ui/NewMessageScreen.kt`: From account, Instagram's people search, the DM); checked live,
 requests through the engine's forced request (`--es request_room`). A4: the thread, write side (`ui/Composer.kt`: the composer, the message menu; `AppModel`'s
 send, reply, react, edit, unsend, typing, with a local echo and "Not sent. Tap to retry"; checked live between
@@ -18,7 +20,7 @@ inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. Media come with A6. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. Onboarding, account health and Remove Account come with A7. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -88,7 +90,9 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   each checksummed in `gradle/verification-metadata.xml`; Gradle itself pinned by `distributionSha256Sum`. Name the
   library and version to the user and wait for a yes before adding one; never a dynamic version. Approved beyond
   that: `kotlinx-serialization-json` (Kotlin's own, the engine's JSON, as Swift's `Codable`) with its compiler plugin,
-  and JUnit 4 for tests only. The platform covers the web view and the Keystore: no library for those.
+  and JUnit 4 for tests only; Media3 1.11.1 (exoplayer, ui-compose, transformer: playback and shrinking videos, the
+  user's choice for A6), which brings Guava 33.3.1-android and annotation jars. The platform covers the web view, the
+  Keystore, the photo picker and voice recording (`MediaRecorder`): no library for those.
 - **The chat model (`model/`) is a port of the iOS app's, kept close to it** (same names, same order, the Swift
   doc comments) so a fix on one side ports to the other: change both, and port the tests with it. It models what
   the engine sends (core/chat) and nothing of Ferry's bridge: no send statuses ("delivered"), no bridge bot, no
@@ -118,6 +122,18 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,
   2 letters or more) and opens with `IGOpenDM`: our DM, else Instagram's (read once), else a draft until the first
   message. Its answer's `seq` says when the room is in (`AppModel.seqWaiters`).
+- **Media** (A6, the iOS app's rules): cards download their file on a tap, never in the row's scope (a row scrolled
+  away would cancel it), into `MediaFiles` (cache folder, Instagram's file names, https only, trimmed past 500 MB); a
+  failed download reads the thread again (`IGReadChat`), since links expire. A card registers its tap with the
+  message's own gesture handler (`LocalTap`), so a long press on a photo still opens the menu. GIFs play three times
+  once per launch, stickers loop, neither in a request or with animations off (Android 9+, `AnimatedImageDrawable`).
+- **Sending media** (`Outgoing`): photos as JPEG (at most 2048 px, quality 85/70/50 until under 8,000,000 bytes; no
+  metadata is copied); animated GIFs and WebPs as they are with their metadata cut out (`MediaClean`: no comments,
+  XMP or EXIF, only frames, timing and loop), at most 8,000,000; videos through Transformer with only the
+  orientation written (no location, XMP or dates), as they are up to 25,000,000 bytes, else 720p, 540p, 480p, else
+  "Trim it first". Media goes first, the text after as its own message (Instagram drops captions). Voice notes: AAC
+  .m4a, 44.1 kHz mono 64 kbit/s, sent as audio/mp4 with the voice flag; a tap records hands-free, a hold sends when
+  let go after a second, five minutes sends itself, leaving the thread or the app throws it away.
 - **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
   only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name. Glyphs are a few
   Material Icons path strings in `ui/Icons.kt`, not a library. Profile pictures load https only, in memory (`Pictures`).
@@ -162,6 +178,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **A removal echo for a reaction loaded with the thread isn't matched** (engine): Instagram names it by its log ID,
   the engine's history reactions are `<msg>~react<fbid>`, so the screen keeps it until a fresh load. Fixed in
   core/chat by luisten/ferry-messenger#10 (one such reaction on the message: redacted; several: a re-read), pinned.
+- **The emulator dies when its audio can't reach the Mac's output** (`coreaudio(output): Could not resume the device`,
+  then hanging QEMU threads, exit 139), here with the output on an external monitor: opening the microphone was
+  enough. Boot with `-no-audio` (the guest still records, silence) or switch the Mac's output. A crash right after
+  an install can leave a corrupt APK: the package vanishes at the next boot, its data stays; reinstall (same uid),
+  and `adb shell sync` after installs. After a crash the emulator shows a dialog asking to send Google the report
+  and waits: boot with `-crash-report-mode never -no-metrics`.
+- **A composable that handles a press must stay in composition until the release**: swapping the composer for the
+  recording strip on press removed the mic button and its gesture, so a hold never saw its release.
 - Kotlin can't alias a nested enum or sealed type with a `val` (`val p = Timeline.GroupPosition`): import its values.
 - `--write-verification-metadata` prints "resolved during configuration time" warnings for every configuration:
   harmless, gone in a normal build.

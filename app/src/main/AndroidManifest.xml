@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Voice notes; asked for at the first press of the mic. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- No backups and no device-to-device transfer: the sessions and the login web view's data stay on this phone. -->
     <application

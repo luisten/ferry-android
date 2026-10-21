@@ -6,6 +6,9 @@ import android.icu.lang.UProperty
 import android.net.Uri
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -45,6 +48,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -79,6 +83,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.ferry.messenger.AppModel
+import fi.ferry.messenger.Outgoing
+import fi.ferry.messenger.VoicePlayer
+import fi.ferry.messenger.VoiceRecorder
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.LinkPreview
@@ -132,6 +139,19 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     var replyingTo by remember(roomID) { mutableStateOf<Message?>(null) }
     var editing by remember(roomID) { mutableStateOf<Message?>(null) }
     var replyingInstead by remember(roomID) { mutableStateOf(false) }
+    var attachment by remember(roomID) { mutableStateOf<AttachmentState?>(null) }
+    val context = LocalContext.current
+    // Android's photo picker: no permission, only what's picked (DESIGN §6.9: photos and videos, no camera).
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val preparing = AttachmentState.Preparing(if (context.contentResolver.getType(uri)?.startsWith("video/") == true) "video" else "photo")
+        attachment = preparing
+        Outgoing.prepare(context, uri) { result ->
+            if (attachment !== preparing) return@prepare // removed meanwhile
+            attachment = result.getOrNull()?.let { AttachmentState.Ready(it) }
+            result.exceptionOrNull()?.let { AppModel.actionError = it.message ?: "This can't be sent." }
+        }
+    }
     var confirmingDelete by remember(roomID) { mutableStateOf(false) }
     val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
     // ponytail: SIGNED_OUT keeps the composer (a send fails with its reason) until A7's "Log in again" bar.
@@ -147,9 +167,19 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     )
     fun send() {
         val text = draft.text.trim()
-        if (text.isEmpty() || text.length > Timeline.MAX_TEXT_LENGTH) return
+        val media = (attachment as? AttachmentState.Ready)?.attachment
+        if (text.isEmpty() && media == null || text.length > Timeline.MAX_TEXT_LENGTH) return
         val edited = editing
-        if (edited != null) { if (text != edited.body) AppModel.edit(edited, text, room) } else AppModel.send(text, replyingTo?.eventID, room)
+        if (edited != null) {
+            if (text.isNotEmpty() && text != edited.body) AppModel.edit(edited, text, room)
+        } else {
+            // The media first, then the text as its own message (Instagram drops captions); the reply goes on the text.
+            if (media != null) {
+                AppModel.sendMedia(media, replyingTo?.eventID?.takeIf { text.isEmpty() }, room)
+                attachment = null
+            }
+            if (text.isNotEmpty()) AppModel.send(text, replyingTo?.eventID, room)
+        }
         draft = TextFieldValue()
         replyingTo = null
         editing = null
@@ -177,7 +207,10 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
             keyboard?.show()
         }
     }
-    DisposableEffect(roomID) { onDispose { AppModel.setTyping(false, room) } }
+    DisposableEffect(roomID) { onDispose { AppModel.setTyping(false, room); VoicePlayer.stop(); VoiceRecorder.cancel() } }
+    var viewer by remember { mutableStateOf<Viewer?>(null) }
+    // GIFs play in a chat, not in a request (nothing there should move before it's accepted).
+    val media = MediaContext(room, autoplay = !Inbox.isRequest(room)) { viewer = it }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -199,6 +232,14 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
                     },
                     send = ::send,
                     focus = focus,
+                    attachment = attachment,
+                    attach = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) {
+                        { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
+                    } else null,
+                    removeAttachment = { attachment = null },
+                    sendVoice = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) {
+                        { note -> AppModel.sendMedia(note, replyingTo?.eventID, room); replyingTo = null }
+                    } else null,
                 )
             }
         },
@@ -213,13 +254,15 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
                 }
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
-                LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
-                    if (typing) item("typing") { TypingBubble(Modifier.padding(top = 10.dp, start = if (isGroup) GROUP_INDENT else 0.dp)) }
-                    items(rows.asReversed(), key = { it.id }) { row ->
-                        MessageRow(row, identity, people, isGroup, showsStatus = row.id == lastOwn,
-                            seenLine = if (row.id == seen?.id) seenLine else null, times = times, actions = actions, showReactions = { reactionsOf = it })
+                CompositionLocalProvider(LocalMedia provides media) {
+                    LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+                        if (typing) item("typing") { TypingBubble(Modifier.padding(top = 10.dp, start = if (isGroup) GROUP_INDENT else 0.dp)) }
+                        items(rows.asReversed(), key = { it.id }) { row ->
+                            MessageRow(row, identity, people, isGroup, showsStatus = row.id == lastOwn,
+                                seenLine = if (row.id == seen?.id) seenLine else null, times = times, actions = actions, showReactions = { reactionsOf = it })
+                        }
+                        item("top") { Top(room, identity, messages.isEmpty()) }
                     }
-                    item("top") { Top(room, identity, messages.isEmpty()) }
                 }
             }
         }
@@ -227,6 +270,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     reactionsOf?.let { message ->
         ModalBottomSheet({ reactionsOf = null }, containerColor = MaterialTheme.colorScheme.background) { ReactionList(message, people) }
     }
+    viewer?.let { MediaViewer(it) { viewer = null } }
     if (confirmingDelete) {
         AlertDialog(
             onDismissRequest = { confirmingDelete = false },
@@ -440,7 +484,7 @@ private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color,
             }
         }
         // ponytail: a labelled card until A6 shows the media itself (photos, videos, voice, GIFs, shares).
-        else -> MediaPlaceholder(kind, message, shape, fill, text)
+        else -> MediaBubble(message, kind) { MediaPlaceholder(kind, message, shape, fill, text) }
     }
 }
 
@@ -568,7 +612,7 @@ private fun TypingBubble(modifier: Modifier) {
 }
 
 /** The thread's own colours (DESIGN §8.1): the incoming bubble and the reaction pills. */
-private object Bubbles {
+object Bubbles {
     val incoming: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF262629) else Color(0xFFE9E9EB)
     val reaction: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color.White
 }

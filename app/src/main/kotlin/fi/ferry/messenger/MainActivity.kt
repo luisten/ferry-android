@@ -41,6 +41,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        VoiceRecorder.cancel() // a note isn't recorded in the background (as on iOS)
+        VoicePlayer.stop()
         AppModel.save()
     }
 }
