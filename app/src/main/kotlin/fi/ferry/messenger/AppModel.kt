@@ -259,9 +259,12 @@ object AppModel {
     /** Instagram keeps one reaction per person: the same emoji again removes ours, another replaces it. Never in a request. */
     fun react(key: String, message: Message, room: Room) {
         val target = message.eventID ?: return
-        val remove = message.reactions.any { it.key == key && ME in it.senders }
+        val remove = message.reactions.any { sameReaction(it.key, key) && ME in it.senders }
         perform(room) { IGCore.react(room.id.encodeToByteArray(), target.encodeToByteArray(), key.encodeToByteArray(), remove) }
     }
+
+    /** Instagram echoes "❤" for the palette's "❤️": keys compare without the emoji variation selector. */
+    fun sameReaction(a: String, b: String) = a.replace("\uFE0F", "") == b.replace("\uFE0F", "")
 
     /** Our own text, within 15 minutes and 5 edits (the engine refuses otherwise; `Timeline.canEdit` hides the item). */
     fun edit(message: Message, text: String, room: Room) {

@@ -8,7 +8,8 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 chat model and the design; this file holds what's Android's own.
 
 **Status:** A4 (2026-10-21): the thread, write side (`ui/Composer.kt`: the composer, the message menu; `AppModel`'s
-send, reply, react, edit, unsend, typing, with a local echo and "Not sent. Tap to retry"). A3: the thread, read side
+send, reply, react, edit, unsend, typing, with a local echo and "Not sent. Tap to retry"; checked live between
+the dummies). A3: the thread, read side
 (`ui/ThreadScreen.kt`: bubbles, group runs, replies, reactions, "Seen" and "Seen by", Instagram's own lines, the start
 block, older pages; media as labelled cards until A6). A2: the
 inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card,
@@ -143,6 +144,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   misses Android's 5 s input timeout. Each `uiautomator dump` also costs the app's main thread 0.4–7 s. Before
   blaming the code: `uptime`, the ANR's `schedstat` (time waiting to run), and the main thread's CPU while idle
   (`/proc/<pid>/task/<pid>/stat`, fields 14–15) should be ~0. Tap by coordinates from a screenshot, not by a dump.
+- **Instagram echoes "❤" for "❤️"** (it drops the emoji variation selector U+FE0F): compare reaction keys with
+  `AppModel.sameReaction`, never `==`, or our own heart isn't ours and choosing it again re-reacts. iOS compares
+  with `==` (told its session, 2026-10-21).
+- **A reaction loaded from history can't be removed from the screen yet** (engine): Instagram's removal echo names
+  the reaction by its log ID, history reactions have the engine's synthetic `<msg>~react<fbid>`, and the thread
+  re-read that follows doesn't drop the stale one. Instagram took the removal (no error); a fresh load wasn't
+  checked. Reported to
+  the iOS session (2026-10-21); the fix belongs in core/chat.
 - Kotlin can't alias a nested enum or sealed type with a `val` (`val p = Timeline.GroupPosition`): import its values.
 - `--write-verification-metadata` prints "resolved during configuration time" warnings for every configuration:
   harmless, gone in a normal build.

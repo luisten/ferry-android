@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import fi.ferry.messenger.AppModel
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.Message
@@ -85,7 +86,7 @@ fun MessageMenu(message: Message, actions: MessageActions, content: @Composable 
     Box(
         Modifier.combinedClickable(
             onClick = { if (failed) actions.retry(message) },
-            onDoubleClick = if (canSend && message.kind.media == null && mine != "❤️") ({ actions.react("❤️", message) }) else null,
+            onDoubleClick = if (canSend && message.kind.media == null && (mine == null || !AppModel.sameReaction(mine, "❤️"))) ({ actions.react("❤️", message) }) else null,
             onLongClick = { if (message.kind != MessageKind.Unsent) open = true },
         ).semantics { if (message.kind != MessageKind.Unsent) onLongClick("Message options") { open = true; true } },
     ) {
@@ -97,10 +98,10 @@ fun MessageMenu(message: Message, actions: MessageActions, content: @Composable 
                         Text(
                             key,
                             Modifier.clip(CircleShape)
-                                .background(if (key == mine) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                                .background(if (mine != null && AppModel.sameReaction(key, mine)) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
                                 .combinedClickable(onClick = { open = false; actions.react(key, message) })
                                 .padding(6.dp)
-                                .semantics { contentDescription = if (key == mine) "Remove $key" else "React $key" },
+                                .semantics { contentDescription = if (mine != null && AppModel.sameReaction(key, mine)) "Remove $key" else "React $key" },
                             fontSize = 24.sp,
                         )
                     }
