@@ -21,7 +21,9 @@ import fi.ferry.messenger.model.PendingMessage
 import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.UserProfile
+import fi.ferry.messenger.model.get
 import fi.ferry.messenger.model.json
+import fi.ferry.messenger.model.long
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -63,6 +65,8 @@ object AppModel {
     var toast by mutableStateOf<String?>(null)
     /** Chats with an older page on its way (the thread's top spinner). */
     var paginating by mutableStateOf(setOf<String>()); private set
+    /** A chat New Message just opened: its thread focuses the composer once (DESIGN N1). */
+    var focusComposer by mutableStateOf<String?>(null)
 
     /** The user every screen treats as "us", in every account's chats. */
     const val ME = IGAdapter.ME
@@ -94,19 +98,28 @@ object AppModel {
     /** Accounts waiting for their first page: the `seq` of its last update. */
     private val waiting = mutableMapOf<String, Long>()
     private var appliedSeq = 0L
+    /** Calls waiting for the engine's updates up to a `seq` (New Message's chat). */
+    private val seqWaiters = mutableListOf<Pair<Long, () -> Unit>>()
+    /**
+     * Archived chats, this phone only (Instagram isn't told): room ID → when (ms). Each is the room's archive tag
+     * (`Inbox.folder`), so a new message still brings the chat back.
+     */
+    private var archived = mapOf<String, Long>()
     private var started = false
 
     /** Once per process: every stored account connects, an Instagram action each (index, mailbox, folders, socket). */
-    fun start(context: Context, demo: Boolean) {
+    fun start(context: Context, demo: Boolean, requestRoom: String? = null) {
         if (started) return
         started = true
         this.demo = demo
         if (demo) return loadDemo()
+        requestRoom?.let { IGCore.setDebug(false, it.encodeToByteArray()) }
         prefs = context.getSharedPreferences("ferry", Context.MODE_PRIVATE)
         sessions = Sessions(context)
         identities = read(IDENTITIES) ?: emptyMap()
         requestsSeen = read(REQUESTS_SEEN) ?: emptyMap()
         viewers += read<Map<String, IG.Viewer>>(VIEWERS).orEmpty()
+        archived = read(ARCHIVED) ?: emptyMap()
         scopeKey = prefs.getString(SCOPE, "").orEmpty()
         val ids = sessions.accounts()
         for (id in ids) statuses[id] = Status("CONNECTING", null, now())
@@ -259,12 +272,9 @@ object AppModel {
     /** Instagram keeps one reaction per person: the same emoji again removes ours, another replaces it. Never in a request. */
     fun react(key: String, message: Message, room: Room) {
         val target = message.eventID ?: return
-        val remove = message.reactions.any { sameReaction(it.key, key) && ME in it.senders }
+        val remove = message.reacted(key, ME)
         perform(room) { IGCore.react(room.id.encodeToByteArray(), target.encodeToByteArray(), key.encodeToByteArray(), remove) }
     }
-
-    /** Instagram echoes "❤" for the palette's "❤️": keys compare without the emoji variation selector. */
-    fun sameReaction(a: String, b: String) = a.replace("\uFE0F", "") == b.replace("\uFE0F", "")
 
     /** Our own text, within 15 minutes and 5 edits (the engine refuses otherwise; `Timeline.canEdit` hides the item). */
     fun edit(message: Message, text: String, room: Room) {
@@ -301,7 +311,83 @@ object AppModel {
 
     private fun newOTID(): String = if (demo) "demo-${now()}" else IGCore.newOTID()?.decodeToString().orEmpty()
 
-    fun accountName(room: Room): String = room.bridge?.receiver?.let { identities[it]?.name } ?: "your chats"
+    // Requests (DESIGN I2/T2)
+
+    /** The chat moves to the main list at once; Instagram accepts, then the engine reads it again. A failure puts it back. */
+    fun accept(room: Room) {
+        if (!Inbox.isRequest(room)) return
+        room.requestAction = Room.RequestAction.ACCEPT
+        toast = "Accepted. This chat is now in ${accountName(room)}."
+        refresh()
+        requestCall(room, IGCore::accept) { room.requestAction = null; toast = null }
+    }
+
+    /** Deleted on Instagram for this account too: the chat hides at once and goes with the engine's `RoomRemoved`. */
+    fun deleteRequest(room: Room) {
+        if (!Inbox.isRequest(room)) return
+        room.requestAction = Room.RequestAction.DELETE
+        refresh()
+        requestCall(room, IGCore::deleteThread) { room.requestAction = null }
+    }
+
+    // ponytail: the demo keeps the optimistic Accept or Delete (nothing to ask), so its screens can be checked.
+    private fun requestCall(room: Room, call: (ByteArray) -> ByteArray?, undo: () -> Unit) {
+        if (demo || room.id !in rooms) return
+        thread {
+            val error = failure(call(room.id.encodeToByteArray())?.decodeToString())
+            if (error != null) main.post { undo(); actionError = error; refresh() }
+        }
+    }
+
+    // Archive (DESIGN §4.5): this phone only, Instagram isn't told
+
+    fun setArchived(archive: Boolean, room: Room) {
+        val tag = Inbox.archiveTag(room, now())
+        room.tags = if (archive) room.tags + (Inbox.ARCHIVED_TAG to tag) else room.tags - Inbox.ARCHIVED_TAG
+        archived = if (archive) archived + (room.id to (tag[Inbox.ARCHIVED_AT_KEY].long ?: now())) else archived - room.id
+        write(ARCHIVED, archived)
+        if (archive) toast = "Archived. New messages bring it back."
+        refresh()
+    }
+
+    private fun archiveTag(at: Long) = buildJsonObject { put(Inbox.ARCHIVED_AT_KEY, at) }
+
+    // New message (DESIGN N1)
+
+    /** Instagram's people search as `account`: an Instagram request each, so the screen waits for a pause. Blocking. */
+    fun searchUsers(query: String, account: String): List<BridgeAPI.Contact>? {
+        if (demo) return Demo.contacts(query)
+        val answer = IGCore.search(account.encodeToByteArray(), query.encodeToByteArray())?.decodeToString() ?: return null
+        if (failure(answer) != null) return null
+        return runCatching { json.decodeFromString<List<BridgeAPI.Contact>>(answer) }.getOrNull()
+    }
+
+    /**
+     * The DM with `contact` on `account`: ours, else the one Instagram has (read once), else a draft until the first
+     * message makes it (the engine decides). `done` gets the room once its update is in, or why not.
+     */
+    fun openDM(contact: BridgeAPI.Contact, account: String, done: (room: String?, error: String?) -> Unit) {
+        if (demo) {
+            val room = Inbox.existingDM(contact.id, account, rooms.values)?.id
+            return done(room, if (room == null) "This is the demo: only its own chats open." else null)
+        }
+        val payload = json.encodeToString(contact).encodeToByteArray()
+        thread {
+            val answer = IGCore.openDM(account.encodeToByteArray(), payload)?.decodeToString()
+            val error = failure(answer)
+            val found = answer?.let { runCatching { json.decodeFromString<IG.Result>(it) }.getOrNull() }
+            main.post {
+                val room = found?.room
+                when {
+                    error != null || room == null -> done(null, error ?: "The engine found no chat.")
+                    (found.seq ?: 0) <= appliedSeq -> done(room, null)
+                    else -> seqWaiters += (found.seq ?: 0) to { done(room, null) }
+                }
+            }
+        }
+    }
+
+    fun accountName(room: Room): String =room.bridge?.receiver?.let { identities[it]?.name } ?: "your chats"
 
     /** The screens read the rooms again (after a change inside one). */
     private fun refresh() {
@@ -398,6 +484,7 @@ object AppModel {
             main.post {
                 updates.forEach(::handle)
                 waiting.entries.removeAll { (id, seq) -> (seq <= appliedSeq).also { if (it) loaded += id } }
+                seqWaiters.toList().filter { it.first <= appliedSeq }.forEach { seqWaiters.remove(it); it.second() }
                 updateInitialSync()
                 roomsState.value = roomsState.value // the screens read the rooms again
             }
@@ -433,6 +520,7 @@ object AppModel {
             rooms[id] = it
         } else return
         IGAdapter.apply(update, room)
+        archived[id]?.let { if (Inbox.ARCHIVED_TAG !in room.tags) room.tags = room.tags + (Inbox.ARCHIVED_TAG to archiveTag(it)) }
         update.profiles?.let { profiles = profiles + it }
     }
 
@@ -451,4 +539,5 @@ object AppModel {
     private const val REQUESTS_SEEN = "requests.seen"
     private const val VIEWERS = "viewers"
     private const val SCOPE = "inbox.scope"
+    private const val ARCHIVED = "archived"
 }

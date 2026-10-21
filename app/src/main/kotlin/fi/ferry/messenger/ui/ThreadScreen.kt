@@ -1,7 +1,9 @@
 package fi.ferry.messenger.ui
 
+import android.content.Intent
 import android.icu.lang.UCharacter
 import android.icu.lang.UProperty
+import android.net.Uri
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -10,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -28,7 +31,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,10 +55,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -59,6 +65,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -124,6 +131,11 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     var draft by rememberSaveable(roomID, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     var replyingTo by remember(roomID) { mutableStateOf<Message?>(null) }
     var editing by remember(roomID) { mutableStateOf<Message?>(null) }
+    var replyingInstead by remember(roomID) { mutableStateOf(false) }
+    var confirmingDelete by remember(roomID) { mutableStateOf(false) }
+    val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
+    // ponytail: SIGNED_OUT keeps the composer (a send fails with its reason) until A7's "Log in again" bar.
+    val bar = Inbox.threadBar(room, login?.health, replyingInstead)
     val actions = MessageActions(
         react = { key, message -> AppModel.react(key, message, room) },
         reply = { editing = null; replyingTo = it },
@@ -154,21 +166,37 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     // Derived, so a keystroke recomposes only the composer, not the whole thread.
     val composing by remember(roomID) { derivedStateOf { draft.text.isNotEmpty() && editing == null } }
     LaunchedEffect(composing) { AppModel.setTyping(composing, room) }
-    // Reply and Edit open the keyboard, as on iOS.
+    // Reply, Edit, "Reply instead" and a chat New Message opened bring up the keyboard, as on iOS.
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    LaunchedEffect(replyingTo, editing) { if (replyingTo != null || editing != null) { focus.requestFocus(); keyboard?.show() } }
+    LaunchedEffect(replyingTo, editing, replyingInstead) {
+        val opened = AppModel.focusComposer == roomID
+        if (opened) AppModel.focusComposer = null
+        if (bar != Inbox.ThreadBar.REQUEST && (opened || replyingTo != null || editing != null || replyingInstead)) {
+            focus.requestFocus()
+            keyboard?.show()
+        }
+    }
     DisposableEffect(roomID) { onDispose { AppModel.setTyping(false, room) } }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            // ponytail: no composer in a request yet; Accept, Delete and "Reply instead" come with A5.
-            if (!Inbox.isRequest(room)) {
+            if (bar == Inbox.ThreadBar.REQUEST) {
+                RequestBar(AppModel.contactHandle(room)?.let { "@$it" } ?: room.name, identity,
+                    accept = { AppModel.accept(room) }, delete = { confirmingDelete = true }, replyInstead = { replyingInstead = true })
+            } else {
                 Composer(
-                    draft, { draft = it }, identity, AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver },
-                    mode = editing?.let { ComposerMode.Editing } ?: replyingTo?.let { ComposerMode.Replying(people.firstName(it.sender), it.kind.media?.label ?: it.body) },
-                    cancel = { if (editing != null) draft = TextFieldValue(); replyingTo = null; editing = null },
+                    draft, { draft = it }, identity, login,
+                    mode = editing?.let { ComposerMode.Editing }
+                        ?: replyingTo?.let { ComposerMode.Replying(people.firstName(it.sender), it.kind.media?.label ?: it.body) }
+                        ?: ComposerMode.AcceptsRequest.takeIf { bar == Inbox.ThreadBar.REPLY_ACCEPTS },
+                    cancel = {
+                        if (editing != null) draft = TextFieldValue()
+                        if (replyingTo == null && editing == null) { replyingInstead = false; draft = TextFieldValue() } // back to the request bar
+                        replyingTo = null
+                        editing = null
+                    },
                     send = ::send,
                     focus = focus,
                 )
@@ -180,7 +208,9 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
                 Box(Modifier.fillMaxWidth().height(170.dp).background(Brush.verticalGradient(listOf(identity.color.wash, Color.Transparent))))
             }
             Column(Modifier.padding(padding)) {
-                ThreadHeader(room, identity, back)
+                ThreadHeader(room, identity, back) {
+                    if (Inbox.folder(room) != Inbox.Folder.REQUESTS) MoreMenu(room)
+                }
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
                 LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
@@ -197,6 +227,39 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     reactionsOf?.let { message ->
         ModalBottomSheet({ reactionsOf = null }, containerColor = MaterialTheme.colorScheme.background) { ReactionList(message, people) }
     }
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete request from ${room.name}?") },
+            // ponytail: iOS's copy; whether Instagram shows the requester a "Seen" is untested, so it keeps the warning.
+            text = { Text("It's deleted from ${login?.profile?.username?.let { "@$it's" } ?: "your"} Instagram inbox too. They may see it as read.") },
+            confirmButton = {
+                TextButton({ confirmingDelete = false; AppModel.deleteRequest(room); back() }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton({ confirmingDelete = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** DESIGN T1's ⋯ menu, its v1 part: Open in Instagram (once the handle is known) and Archive or Unarchive. */
+@Composable
+private fun MoreMenu(room: Room) {
+    var open by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val archived = Inbox.folder(room) == Inbox.Folder.ARCHIVED
+    Box {
+        IconButton({ open = true }) { Icon(Icons.more, "More") }
+        DropdownMenu(open, { open = false }) {
+            AppModel.contactHandle(room)?.let { handle ->
+                DropdownMenuItem({ Text("Open in Instagram") }, {
+                    open = false
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com/$handle/")))
+                }, leadingIcon = { Icon(Icons.openOutside, null) })
+            }
+            DropdownMenuItem({ Text(if (archived) "Unarchive" else "Archive") }, { open = false; AppModel.setArchived(!archived, room) },
+                leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
+        }
+    }
 }
 
 /** Who someone is in this chat: the thread's names (`Room.displayName`), first names for captions, pictures. */
@@ -209,10 +272,10 @@ private class People(val room: Room, val profiles: Map<String, UserProfile>) {
 
 /** One glass-free capsule's worth: back, the contact, and under the name the account this chat belongs to. */
 @Composable
-private fun ThreadHeader(room: Room, identity: AccountIdentity?, back: () -> Unit) {
+private fun ThreadHeader(room: Room, identity: AccountIdentity?, back: () -> Unit, actions: @Composable () -> Unit) {
     Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(back) { Icon(Icons.back, "Back") }
-        Row(Modifier.semantics(mergeDescendants = true) { heading() }, verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.weight(1f).semantics(mergeDescendants = true) { heading() }, verticalAlignment = Alignment.CenterVertically) {
             ChatAvatar(room, 32.dp)
             Spacer(Modifier.width(8.dp))
             Column {
@@ -220,6 +283,7 @@ private fun ThreadHeader(room: Room, identity: AccountIdentity?, back: () -> Uni
                 if (identity != null) AccountTag(identity, compact = true)
             }
         }
+        actions()
     }
 }
 
@@ -292,10 +356,13 @@ private fun MessageRow(
                 }
                 Box(Modifier.fillMaxWidth(0.75f), contentAlignment = if (own) Alignment.BottomEnd else Alignment.BottomStart) {
                     Box(Modifier.padding(bottom = if (message.reactions.isEmpty()) 0.dp else 14.dp)) {
-                        MessageMenu(message, actions) { Bubble(message, row.position, identity, people) }
-                        if (message.reactions.isNotEmpty()) {
-                            ReactionPills(message, people, isGroup, Modifier.align(if (own) Alignment.BottomStart else Alignment.BottomEnd)
-                                .offset(x = if (own) (-8).dp else 8.dp, y = 14.dp)) { showReactions(message) }
+                        MessageMenu(message, actions) {
+                            Bubble(message, row.position, identity, people) {
+                                if (message.reactions.isNotEmpty()) {
+                                    ReactionPills(message, people, isGroup, Modifier.align(if (own) Alignment.BottomStart else Alignment.BottomEnd)
+                                        .offset(x = if (own) (-8).dp else 8.dp, y = 14.dp)) { showReactions(message) }
+                                }
+                            }
                         }
                     }
                 }
@@ -332,40 +399,48 @@ private fun UnreadLine() {
 
 /** A story reply or reaction is the story with what was sent under it, as Instagram shows them. */
 @Composable
-private fun Bubble(message: Message, position: GroupPosition, identity: AccountIdentity?, people: People) {
+/** `pills` sit on the bubble's last part: the text under a story or a share, not the card's far edge. */
+private fun Bubble(message: Message, position: GroupPosition, identity: AccountIdentity?, people: People, pills: @Composable BoxScope.() -> Unit) {
     val own = message.isOwn
     val shape = bubbleShape(position, own)
     val fill = if (own) identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground else Bubbles.incoming
     val text = if (own) Color.White else MaterialTheme.colorScheme.onBackground
+    val share = message.shareText
     Column(horizontalAlignment = if (own) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        when (val kind = message.kind) {
-            MessageKind.Unsent -> {
-                val stroke = MaterialTheme.colorScheme.onSurfaceVariant
-                Text(
-                    if (own) "You unsent a message" else "${people.firstName(message.sender)} unsent a message",
-                    Modifier.drawBehind {
-                        drawRoundRect(stroke, cornerRadius = CornerRadius(size.height / 2),
-                            style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))))
-                    }.padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            MessageKind.Text, MessageKind.Notice -> TextBubble(message.body, shape, fill, text)
-            MessageKind.Link -> {
-                val preview = LinkPreview.of(message.content)
-                Column(Modifier.background(fill, shape).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Text(message.body, style = MaterialTheme.typography.bodyLarge, color = text)
-                    if (preview != null) {
-                        Spacer(Modifier.height(6.dp))
-                        preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
-                        Text(parseURL(preview.url)?.host.orEmpty(), style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f))
-                    }
+        Box { BubbleBody(message, shape, fill, text, people); if (share == null) pills() }
+        share?.let { Box { TextBubble(it, bubbleShape(GroupPosition.SINGLE, own), fill, text); pills() } }
+    }
+}
+
+@Composable
+private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color, text: Color, people: People) {
+    val own = message.isOwn
+    when (val kind = message.kind) {
+        MessageKind.Unsent -> {
+            val stroke = MaterialTheme.colorScheme.onSurfaceVariant
+            Text(
+                if (own) "You unsent a message" else "${people.firstName(message.sender)} unsent a message",
+                Modifier.drawBehind {
+                    drawRoundRect(stroke, cornerRadius = CornerRadius(size.height / 2),
+                        style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))))
+                }.padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        MessageKind.Text, MessageKind.Notice -> TextBubble(message.body, shape, fill, text)
+        MessageKind.Link -> {
+            val preview = LinkPreview.of(message.content)
+            Column(Modifier.background(fill, shape).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Text(message.body, style = MaterialTheme.typography.bodyLarge, color = text)
+                if (preview != null) {
+                    Spacer(Modifier.height(6.dp))
+                    preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
+                    Text(parseURL(preview.url)?.host.orEmpty(), style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f))
                 }
             }
-            // ponytail: a labelled card until A6 shows the media itself (photos, videos, voice, GIFs, shares).
-            else -> MediaPlaceholder(kind, message, shape, fill, text)
         }
-        message.shareText?.let { TextBubble(it, bubbleShape(GroupPosition.SINGLE, own), fill, text) }
+        // ponytail: a labelled card until A6 shows the media itself (photos, videos, voice, GIFs, shares).
+        else -> MediaPlaceholder(kind, message, shape, fill, text)
     }
 }
 

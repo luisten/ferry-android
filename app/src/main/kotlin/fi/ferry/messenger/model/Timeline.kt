@@ -289,7 +289,18 @@ data class Message(
         val myEventID: String?,
     ) {
         val count: Int get() = senders.size
+
+        companion object {
+            /**
+             * One reaction with or without its variation selector: we send "❤️", Instagram stores and echoes "❤"
+             * (Android's A4 check, 2026-10-21: choosing ❤️ again reacted again instead of removing it).
+             */
+            fun same(a: String, b: String): Boolean = a.replace("\uFE0F", "") == b.replace("\uFE0F", "")
+        }
     }
+
+    /** Whether `user` reacted with `key`. */
+    fun reacted(key: String, user: String): Boolean = reactions.any { Reaction.same(it.key, key) && user in it.senders }
 
     data class Reply(
         val eventID: String,
@@ -521,7 +532,7 @@ object Timeline {
             val key = event.content["m.relates_to"]["key"].string ?: continue
             val sender = event.sender ?: continue
             val mine = if (sender == me) event.eventID else null
-            val i = groups.indexOfFirst { it.key == key }
+            val i = groups.indexOfFirst { Message.Reaction.same(it.key, key) }
             if (i >= 0) groups[i] = groups[i].copy(senders = groups[i].senders + sender, myEventID = groups[i].myEventID ?: mine)
             else groups += Message.Reaction(key, listOf(sender), mine)
         }

@@ -7,7 +7,8 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A4 (2026-10-21): the thread, write side (`ui/Composer.kt`: the composer, the message menu; `AppModel`'s
+**Status:** A5 (2026-10-21): requests (`RequestBar`: Accept, Delete, "Reply instead"), Archive and Unarchive (this
+phone only), New Message (`ui/NewMessageScreen.kt`: From account, Instagram's people search, the DM). A4: the thread, write side (`ui/Composer.kt`: the composer, the message menu; `AppModel`'s
 send, reply, react, edit, unsend, typing, with a local echo and "Not sent. Tap to retry"; checked live between
 the dummies). A3: the thread, read side
 (`ui/ThreadScreen.kt`: bubbles, group runs, replies, reactions, "Seen" and "Seen by", Instagram's own lines, the start
@@ -16,7 +17,7 @@ inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. Requests' Accept, Delete and Reply instead come with A5. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. Media come with A6. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -108,6 +109,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   Delete. React, edit and unsend wait for the echo instead; a failure shows as a notice. The menu (long press) offers
   only what the engine allows: no reactions, edits or unsends in a request, Edit only within `Timeline.canEdit`.
   Typing goes to the engine as it starts and stops; the engine throttles it and never sends it in a request.
+- **A request** shows `RequestBar` instead of the composer (`Inbox.threadBar`). Accept and Delete are optimistic
+  (`Room.requestAction`: the chat moves or hides at once) and undone with a notice if the engine refuses; a Delete's
+  room then goes with the engine's `RoomRemoved`. "Reply instead" sends through the engine, which accepts first.
+- **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
+  SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told.
+- **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,
+  2 letters or more) and opens with `IGOpenDM`: our DM, else Instagram's (read once), else a draft until the first
+  message. Its answer's `seq` says when the room is in (`AppModel.seqWaiters`).
 - **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
   only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name. Glyphs are a few
   Material Icons path strings in `ui/Icons.kt`, not a library. Profile pictures load https only, in memory (`Pictures`).

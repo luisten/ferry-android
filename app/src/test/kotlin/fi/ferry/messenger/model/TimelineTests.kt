@@ -156,6 +156,20 @@ class TimelineTests {
         assertNull(reactions[1].myEventID)
     }
 
+    /** A reaction is the same with or without its variation selector: we send "❤️", Instagram echoes "❤". */
+    @Test fun instagramsHeartIsOurs() {
+        val events = listOf(
+            message("\$m", 1),
+            reaction("\$r1", "\$m", "❤", me),
+            reaction("\$r2", "\$m", "❤️", ghost),
+        )
+        val reduced = Timeline.reduce(events, me)[0]
+        assertEquals(1, reduced.reactions.size) // one heart, two people
+        assertEquals(listOf(me, ghost), reduced.reactions[0].senders)
+        assertTrue(reduced.reacted("❤️", me)) // the palette's heart: choosing it again removes ours
+        assertFalse(reduced.reacted("😂", me))
+    }
+
     /** Instagram allows one reaction per person: only each sender's latest counts, even if the old one stayed. */
     @Test fun onlyTheLatestReactionPerSenderCounts() {
         val events = listOf(

@@ -1,5 +1,6 @@
 package fi.ferry.messenger
 
+import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.Event
 import fi.ferry.messenger.model.EventList
 import fi.ferry.messenger.model.IG
@@ -63,6 +64,13 @@ object Demo {
         sam to UserProfile("Sam Lee"),
         priya to UserProfile("Priya Nair", handle = "priya.n"),
     )
+
+    /** New Message's search: the made-up people whose name or handle has `query` (their DMs open; the group's don't). */
+    fun contacts(query: String): List<BridgeAPI.Contact> = profiles.mapNotNull { (user, p) ->
+        val q = query.trim().lowercase()
+        if (listOfNotNull(p.name, p.handle).none { q in it.lowercase() }) null
+        else BridgeAPI.Contact(user.removePrefix("@ig_"), p.name, p.avatarURL, p.handle?.let { listOf("instagram:$it") })
+    }
 
     fun rooms(now: Long): List<Room> =
         chats.mapIndexed { i, c -> dm("!debug-demo-${i + 1}", c.name, c.fbid, c.account, request = false, c.unread,

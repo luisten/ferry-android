@@ -19,4 +19,7 @@ What changes for people who use the app, in plain words. The format is
 - Write back: send a message, reply to one, react (long press, or double tap for a heart), edit within 15 minutes,
   unsend, copy. Your message shows at once; if it can't be sent, tap it to try again. The other side sees when you're
   typing.
+- Message requests: accept, delete, or reply (which accepts). Until you do, they don't see that you've read them.
+- Archive a chat (long press, or the ⋯ menu in the chat). It's on this phone only, and a new message brings it back.
+- New message: choose which of your accounts it's from, search Instagram for someone and start the chat.
 - Your login stays on this phone, encrypted, and out of backups.

@@ -2,8 +2,10 @@ package fi.ferry.messenger.ui
 
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,15 +50,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.ferry.messenger.AppModel
@@ -67,7 +73,7 @@ import java.time.ZoneId
 
 /** I1, the inbox (DESIGN §4, I1): account stack, title, Folders menu, scope bar, the Requests card, chat rows. */
 @Composable
-fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) -> Unit, openAccounts: () -> Unit) {
+fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) -> Unit, openAccounts: () -> Unit, newMessage: () -> Unit) {
     val scope = AppModel.scope
     val rooms = AppModel.rooms.values
     val logins = AppModel.loginIDs
@@ -80,7 +86,16 @@ fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) 
     val newRequests = if (searching || !AppModel.initialSyncDone) emptyList() else Inbox.newRequests(rooms, scope, logins, AppModel.requestsSeen)
     BackHandler(query != null) { query = null }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        floatingActionButton = {
+            // DESIGN I1's compose button: in an account's scope, in its colour.
+            if (query == null && AppModel.accounts.isNotEmpty()) {
+                FloatingActionButton(newMessage, containerColor = identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground,
+                    contentColor = MaterialTheme.colorScheme.background) { Icon(Icons.edit, "New message") }
+            }
+        },
+    ) { padding ->
         Box(Modifier.fillMaxSize()) {
             // Account scope wears the account's colour: a faint wash fading down from the top (DESIGN §3.3).
             if (identity != null) {
@@ -100,6 +115,7 @@ fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) 
                     SearchBar(query!!, if (identity != null) "Search ${identity.name}" else "Search", { query = it }, { query = null })
                 }
                 if (multiAccount) ScopeBar(scope)
+                AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 val times = rememberTimeFormats()
                 LazyColumn(Modifier.fillMaxSize()) {
                     if (newRequests.isNotEmpty()) {
@@ -107,7 +123,7 @@ fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) 
                     }
                     if (AppModel.initialSyncDone) {
                         items(list, key = { it.id }) { room ->
-                            ChatRow(room, showsMark = scope == Inbox.Scope.All && multiAccount, times, Modifier.clickable { openThread(room.id) })
+                            ArchiveActions(room, { openThread(room.id) }) { ChatRow(room, showsMark = scope == Inbox.Scope.All && multiAccount, times, it) }
                             HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     } else {
@@ -121,6 +137,28 @@ fun InboxScreen(openThread: (String) -> Unit, openFolder: (Folder, Inbox.Scope) 
                     else -> EmptyInbox(scope, identity?.name)
                 }
             }
+        }
+    }
+}
+
+/**
+ * DESIGN I1/I4: a row's long press offers Archive, or Unarchive in Archived (for TalkBack, an action). Requests have
+ * neither: they stay in Requests either way. ponytail: no swipe to archive yet; the long press covers it.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ArchiveActions(room: Room, open: () -> Unit, row: @Composable (Modifier) -> Unit) {
+    val folder = Inbox.folder(room)
+    if (folder == Folder.REQUESTS) return row(Modifier.clickable(onClick = open))
+    var menu by remember { mutableStateOf(false) }
+    val archived = folder == Folder.ARCHIVED
+    val label = if (archived) "Unarchive" else "Archive"
+    val act = { menu = false; AppModel.setArchived(!archived, room) }
+    Box {
+        row(Modifier.combinedClickable(onClick = open, onLongClick = { menu = true })
+            .semantics { customActions = listOf(CustomAccessibilityAction(label) { act(); true }) })
+        DropdownMenu(menu, { menu = false }, offset = DpOffset(86.dp, 0.dp)) {
+            DropdownMenuItem({ Text(label) }, act, leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
         }
     }
 }

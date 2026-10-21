@@ -2,7 +2,6 @@ package fi.ferry.messenger.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,6 +65,7 @@ fun FolderScreen(folder: Folder, scope: Inbox.Scope, openThread: (String) -> Uni
                     Text(scopeName ?: "All accounts", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
             if (AppModel.initialSyncDone && rooms.isEmpty()) {
                 EmptyFolder(folder, scope)
                 return@Column
@@ -96,7 +96,7 @@ fun FolderScreen(folder: Folder, scope: Inbox.Scope, openThread: (String) -> Uni
 
 private fun androidx.compose.foundation.lazy.LazyListScope.rows(rooms: List<Room>, showsMark: Boolean, times: Inbox.TimeFormats, open: (String) -> Unit) {
     items(rooms, key = { it.id }) { room ->
-        ChatRow(room, showsMark, times, Modifier.clickable { open(room.id) })
+        ArchiveActions(room, { open(room.id) }) { ChatRow(room, showsMark, times, it) }
         HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }

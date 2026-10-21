@@ -24,15 +24,18 @@ import fi.ferry.messenger.ui.AccountsSheet
 import fi.ferry.messenger.ui.FerryTheme
 import fi.ferry.messenger.ui.FolderScreen
 import fi.ferry.messenger.ui.InboxScreen
+import fi.ferry.messenger.ui.NewMessageScreen
 import fi.ferry.messenger.ui.ThreadScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // Debug builds: `--ez demo true` shows made-up data only, and nothing connects (`Demo`).
+        // Debug builds: `--ez demo true` shows made-up data only, and nothing connects (`Demo`); `--es request_room <room>`
+        // has the engine treat that real chat as a request and hold back its sends (iOS's FERRY_DEBUG_AS_REQUEST).
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        AppModel.start(applicationContext, demo = debuggable && intent.getBooleanExtra("demo", false))
+        AppModel.start(applicationContext, demo = debuggable && intent.getBooleanExtra("demo", false),
+            requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable })
         setContent { FerryTheme { App() } }
     }
 
@@ -47,6 +50,7 @@ private sealed interface Screen {
     data class Folder(val folder: fi.ferry.messenger.model.Inbox.Folder, val scope: fi.ferry.messenger.model.Inbox.Scope) : Screen
     data class Thread(val room: String) : Screen
     data object Login : Screen
+    data object NewMessage : Screen
 }
 
 // ponytail: a stack of screens in state, no navigation library; one when deep links or saved state need it.
@@ -70,10 +74,13 @@ private fun App() {
         AppModel.accounts.isEmpty() -> Welcome { push(Screen.Login) }
         screen is Screen.Thread -> ThreadScreen(screen.room, ::pop)
         screen is Screen.Folder -> FolderScreen(screen.folder, screen.scope, { push(Screen.Thread(it)) }, ::pop)
+        // The chat it opens takes its place, ready to type (DESIGN N1).
+        screen == Screen.NewMessage -> NewMessageScreen({ AppModel.focusComposer = it; stack = stack.dropLast(1) + Screen.Thread(it) }, ::pop)
         else -> InboxScreen(
             openThread = { push(Screen.Thread(it)) },
             openFolder = { folder, scope -> push(Screen.Folder(folder, scope)) },
             openAccounts = { accountsOpen = true },
+            newMessage = { push(Screen.NewMessage) },
         )
     }
     if (accountsOpen) AccountsSheet(dismiss = { accountsOpen = false }, addAccount = { accountsOpen = false; push(Screen.Login) })
