@@ -18,7 +18,7 @@ inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. Media come with A6. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. Media come with A6. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -161,7 +161,7 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   went and a fresh load agreed.
 - **A removal echo for a reaction loaded with the thread isn't matched** (engine): Instagram names it by its log ID,
   the engine's history reactions are `<msg>~react<fbid>`, so the screen keeps it until a fresh load. Fixed in
-  core/chat by luisten/ferry-messenger#10 (one such reaction on the message: redacted); comes with the next pin.
+  core/chat by luisten/ferry-messenger#10 (one such reaction on the message: redacted; several: a re-read), pinned.
 - Kotlin can't alias a nested enum or sealed type with a `val` (`val p = Timeline.GroupPosition`): import its values.
 - `--write-verification-metadata` prints "resolved during configuration time" warnings for every configuration:
   harmless, gone in a normal build.

@@ -22,4 +22,6 @@ What changes for people who use the app, in plain words. The format is
 - Message requests: accept, delete, or reply (which accepts). Until you do, they don't see that you've read them.
 - Archive a chat (long press, or the ⋯ menu in the chat). It's on this phone only, and a new message brings it back.
 - New message: choose which of your accounts it's from, search Instagram for someone and start the chat.
+- Stickers and GIFs from Instagram's GIPHY picker are named as such, instead of "a message Ferry can't show".
+- A chat that opens unread shows where the new messages start, even when only the newest has arrived.
 - Your login stays on this phone, encrypted, and out of backups.

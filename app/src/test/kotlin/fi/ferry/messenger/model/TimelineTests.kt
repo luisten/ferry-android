@@ -156,6 +156,34 @@ class TimelineTests {
         assertNull(reactions[1].myEventID)
     }
 
+    /**
+     * Only a send from this phone takes the thread to its end (`Message.isLocalEcho`): our own message sent from
+     * Instagram's app arrives as an event (with its offline threading ID, like any of ours) and leaves the scroll alone.
+     */
+    @Test fun onlyWhatWeSendFromHereIsALocalEcho() {
+        val elsewhere = Event("m.room.message", obj("msgtype" to "m.text", "body" to "from the Instagram app"), "\$own", me,
+            originServerTS = 1, unsigned = Event.Unsigned(transactionID = "751"))
+        val messages = Timeline.reduce(listOf(elsewhere), me, pending = listOf(
+            PendingMessage("t1", obj("msgtype" to "m.text", "body" to "sending"), 2, PendingMessage.State.Sending),
+            PendingMessage("t2", obj("msgtype" to "m.text", "body" to "sent, not back yet"), 3, PendingMessage.State.Sent("\$t2")),
+        ))
+        assertEquals(listOf(true, true, true), messages.map { it.isOwn })
+        assertEquals(listOf(false, true, true), messages.map { it.isLocalEcho })
+    }
+
+    /** The jump-to-newest button's count: what others sent after it appeared, never ours, chat lines or unsent ones. */
+    @Test fun newCountIsOnlyWhatOthersSentSince() {
+        fun message(id: String, ts: Long, own: Boolean = false, kind: MessageKind = MessageKind.Text) =
+            Message(id, sender = if (own) me else ghost, ts = ts, kind = kind, body = id, content = obj(), isOwn = own)
+        val messages = listOf(
+            message("before", 100), message("since", 200), message("mine", 300, own = true),
+            message("left the group", 400, kind = MessageKind.ChatEvent), message("poll", 500, kind = MessageKind.Unsupported("a poll")),
+            message("unsent", 600, kind = MessageKind.Unsent), message("photo", 700, kind = MessageKind.Image),
+        )
+        assertEquals(2, Timeline.newCount(messages, after = 100)) // "since" and the photo
+        assertEquals(0, Timeline.newCount(messages, after = 700))
+    }
+
     /** A reaction is the same with or without its variation selector: we send "❤️", Instagram echoes "❤". */
     @Test fun instagramsHeartIsOurs() {
         val events = listOf(

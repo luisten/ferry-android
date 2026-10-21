@@ -325,4 +325,39 @@ class EngineTests {
         assertEquals(12_500L, MediaInfo(after.content).duration)
         assertEquals("sample.travels", ShareCaption.of(after.content).author)
     }
+
+    /**
+     * A sticker, then a GIF, from Instagram's GIPHY picker (live 2026-10-20, `ig_animated_images_tamo`): both play
+     * like a GIF; the sticker is named so and drawn as one. Ferry said it couldn't show either.
+     */
+    @Test fun giphyStickersAndGIFsAreAnimatedImages() {
+        val thread = Timeline.reduce(events("animated_images_tamo", "thread"), me)
+        assertEquals(listOf(MessageKind.Sticker, MessageKind.Gif), thread.map { it.kind })
+        assertEquals(listOf(true, true), thread.map { MediaInfo(it.content).isAnimated })
+        assertEquals("https://scontent.example.invalid/v/a001.webp", MediaInfo(thread[0].content).url)
+        assertEquals("Sticker", MessageKind.Sticker.media?.label)
+
+        // The mailbox's copies: no media, named from Instagram's snippet until the thread is read.
+        fun preview(event: Event) = Inbox.preview(room(event), me)?.text
+        val receiver = events("animated_images_tamo", "mailbox_receiver")
+        assertEquals(listOf(MessageKind.Sticker, MessageKind.Gif), receiver.map { MessageKind.of(it.type, it.content) })
+        assertEquals(listOf(null, null), receiver.map { MediaInfo(it.content).url })
+        assertEquals(listOf("Sticker", "GIF"), receiver.map(::preview))
+        assertEquals(listOf("You: Sticker", "You: GIF"), events("animated_images_tamo", "mailbox_sender").map(::preview))
+    }
+
+    /**
+     * The same chat as its mailbox copy has it, only the newest message, which is past our watermark: our m.read still
+     * comes (on the only message, with our watermark's time), so the line has its place. Without it an unread live
+     * chat opened with no "New messages" line (QA 2026-10-20).
+     */
+    @Test fun ourWatermarkComesWithAnUnreadMailboxCopy() {
+        val room = room(listOf(Fixture.engine<IG.Update>("unread_window_kivo")))
+        assertTrue(room.isUnread)
+        assertEquals(1_792_115_019_051L, room.receipts[me]?.ts)
+        val messages = Timeline.reduce(room, me)
+        assertEquals(1, messages.size)
+        val rows = Timeline.layout(messages, unreadAfter = room.receipts[me]?.ts)
+        assertEquals(listOf(messages.first().id), rows.filter { it.startsUnread }.map { it.id })
+    }
 }

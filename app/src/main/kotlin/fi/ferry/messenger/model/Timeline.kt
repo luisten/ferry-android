@@ -83,6 +83,8 @@ sealed interface MessageKind {
         const val UNSUPPORTED_KEY = "fi.ferry.unsupported"
         /** The text sent with a share: a story reply, or a story reaction's emoji. */
         const val SHARE_TEXT_KEY = "fi.ferry.share_text"
+        /** A sticker from Instagram's GIPHY picker: an animated image (`MediaInfo.isAnimated`) shown as a sticker. */
+        const val STICKER_KEY = "fi.ferry.sticker"
 
         fun of(type: String, content: JsonElement): MessageKind {
             if (type == "m.sticker") return Sticker
@@ -91,7 +93,8 @@ sealed interface MessageKind {
             if (content["com.beeper.unresolved_media"] != null) return Share(share ?: ShareType.REEL, ShareState.UNRESOLVED)
             val body = content["body"].string.orEmpty()
             return when (content["msgtype"].string) {
-                "m.image" -> share?.let { Share(it, ShareState.READY) } ?: if (content["info"]["fi.mau.gif"].bool == true) Gif else Image
+                "m.image" -> if (content[STICKER_KEY] != null) Sticker
+                    else share?.let { Share(it, ShareState.READY) } ?: if (content["info"]["fi.mau.gif"].bool == true) Gif else Image
                 "m.video" -> share?.let { Share(it, ShareState.READY) } ?: Video
                 "m.audio" -> if (content["org.matrix.msc3245.voice"] != null) Voice else Audio
                 "m.file" -> File
@@ -134,6 +137,8 @@ class MediaInfo(content: JsonElement) {
     val externalURL: String? = content["external_url"].string?.takeIf { parseURL(it) != null }
     /** Photos and videos sent together, each its own content; empty for one. */
     val album: List<JsonElement> = content[ALBUM_KEY].array.orEmpty()
+    /** A GIF, or a sticker from Instagram's GIPHY picker: plays like one (`info.fi.mau.gif`). */
+    val isAnimated: Boolean = info["fi.mau.gif"].bool == true
 
     val isVideo: Boolean get() = msgtype == "m.video"
 
@@ -274,6 +279,9 @@ data class Message(
 ) {
     /** What was sent with a shared story (a reply, a reaction's emoji), shown under its card. */
     val shareText: String? get() = content[MessageKind.SHARE_TEXT_KEY].string
+
+    /** Ours, sent from this phone and not back from Instagram yet. Our own from Instagram's app arrives as an event. */
+    val isLocalEcho: Boolean get() = id.startsWith("txn:")
 
     /** Instagram sends no "delivered": Sending, then Sent, then Seen (`isSeen`). */
     sealed interface Status {
@@ -444,6 +452,13 @@ object Timeline {
         }
         return messages
     }
+
+    /**
+     * The jump-to-newest button's count: messages from others (no chat events or tombstones) newer than `ms`, the
+     * newest message's time when the button appeared.
+     */
+    fun newCount(messages: List<Message>, after: Long): Int =
+        messages.count { !it.isOwn && !it.kind.isChatEvent && it.kind != MessageKind.Unsent && it.ts > after }
 
     /** "Seen by Maya", "… and Sam", "… Maya, Sam + 2", or "Seen by everyone" once all of three or more have. */
     fun seenByLine(names: List<String>, everyone: Boolean): String? = when {
