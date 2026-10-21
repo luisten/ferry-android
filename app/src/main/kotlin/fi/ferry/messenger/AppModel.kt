@@ -15,13 +15,19 @@ import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.IG
 import fi.ferry.messenger.model.IGAdapter
 import fi.ferry.messenger.model.Inbox
+import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessagesPage
+import fi.ferry.messenger.model.PendingMessage
+import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.UserProfile
 import fi.ferry.messenger.model.json
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import kotlin.concurrent.thread
 
 /**
@@ -51,6 +57,10 @@ object AppModel {
     var scopeKey by mutableStateOf(""); private set
     /** Made-up data only (`Demo`): nothing connects. */
     var demo = false; private set
+    /** The last action that failed, for a message on screen. */
+    var actionError by mutableStateOf<String?>(null)
+    /** A short confirmation ("Accepted. This chat is now in Studio."). */
+    var toast by mutableStateOf<String?>(null)
     /** Chats with an older page on its way (the thread's top spinner). */
     var paginating by mutableStateOf(setOf<String>()); private set
 
@@ -189,6 +199,110 @@ object AppModel {
                 }
             }
         }
+    }
+
+    // Thread (write side). Instagram's echo through the socket confirms each one.
+
+    /**
+     * A text, with a local echo at once (its transaction ID is the offline threading ID Instagram gets, so the echo
+     * replaces it). In a request the engine accepts first; the chat moves to the main list here at once.
+     */
+    fun send(text: String, replyTo: String?, room: Room) {
+        if (Inbox.isRequest(room)) {
+            room.requestAction = Room.RequestAction.ACCEPT
+            toast = "Accepted. This chat is now in ${accountName(room)}."
+        }
+        val content = buildJsonObject {
+            put("msgtype", "m.text")
+            put("body", text)
+            if (replyTo != null) putJsonObject("m.relates_to") { putJsonObject("m.in_reply_to") { put("event_id", replyTo) } }
+        }
+        val pending = PendingMessage(newOTID(), content, now(), PendingMessage.State.Sending)
+        room.addPending(pending)
+        refresh()
+        deliver(pending, room)
+    }
+
+    private fun deliver(pending: PendingMessage, room: Room) {
+        if (demo || room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
+        val text = Timeline.body(pending.content).encodeToByteArray()
+        val replyTo = Timeline.replyTarget(pending.content).orEmpty().encodeToByteArray()
+        thread {
+            val answer = IGCore.send(room.id.encodeToByteArray(), text, replyTo, pending.txnID.encodeToByteArray())?.decodeToString()
+            val failure = failure(answer)
+            val id = answer?.let { runCatching { json.decodeFromString<IG.Result>(it).id }.getOrNull() }
+            main.post {
+                update(room, pending.txnID, if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(id ?: pending.txnID))
+            }
+        }
+    }
+
+    private fun update(room: Room, txnID: String, state: PendingMessage.State) {
+        room.updatePending(txnID, state)
+        refresh()
+    }
+
+    /** "Not sent. Tap to retry": the same offline threading ID again, so an echo still on its way clears it. */
+    fun retry(message: Message, room: Room) {
+        val txnID = message.txnID ?: return
+        if (message.status !is Message.Status.Failed || message.eventID != null) return
+        val pending = room.pending.firstOrNull { it.txnID == txnID } ?: return
+        update(room, txnID, PendingMessage.State.Sending)
+        deliver(pending, room)
+    }
+
+    /** Drops a failed local echo that never reached Instagram. */
+    fun discard(message: Message, room: Room) {
+        if (message.eventID == null) message.txnID?.let { room.removePending(it); refresh() }
+    }
+
+    /** Instagram keeps one reaction per person: the same emoji again removes ours, another replaces it. Never in a request. */
+    fun react(key: String, message: Message, room: Room) {
+        val target = message.eventID ?: return
+        val remove = message.reactions.any { it.key == key && ME in it.senders }
+        perform(room) { IGCore.react(room.id.encodeToByteArray(), target.encodeToByteArray(), key.encodeToByteArray(), remove) }
+    }
+
+    /** Our own text, within 15 minutes and 5 edits (the engine refuses otherwise; `Timeline.canEdit` hides the item). */
+    fun edit(message: Message, text: String, room: Room) {
+        val target = message.eventID ?: return
+        perform(room) { IGCore.edit(room.id.encodeToByteArray(), target.encodeToByteArray(), text.encodeToByteArray()) }
+    }
+
+    /** Unsend, for everyone (Instagram has no "delete for me"): our own messages. */
+    fun unsend(message: Message, room: Room) {
+        val target = message.eventID ?: return
+        perform(room) { IGCore.unsend(room.id.encodeToByteArray(), target.encodeToByteArray()) }
+    }
+
+    /** The composer's typing state as it changes: the engine tells Instagram at most once per 20 s, never in a request. */
+    fun setTyping(on: Boolean, room: Room) {
+        if (demo || room.id !in rooms) return
+        thread { IGCore.typing(room.id.encodeToByteArray(), on) }
+    }
+
+    private fun perform(room: Room, work: () -> ByteArray?) {
+        if (demo || room.id !in rooms) {
+            actionError = "This is the demo: nothing is sent."
+            return
+        }
+        thread {
+            val error = failure(work()?.decodeToString())
+            if (error != null) main.post { actionError = error }
+        }
+    }
+
+    /** The engine's failure (`{"error"}`), or null for an answer. */
+    private fun failure(answer: String?): String? =
+        if (answer == null) "The engine returned nothing." else runCatching { json.decodeFromString<Failure>(answer).error }.getOrNull()
+
+    private fun newOTID(): String = if (demo) "demo-${now()}" else IGCore.newOTID()?.decodeToString().orEmpty()
+
+    fun accountName(room: Room): String = room.bridge?.receiver?.let { identities[it]?.name } ?: "your chats"
+
+    /** The screens read the rooms again (after a change inside one). */
+    private fun refresh() {
+        roomsState.value = roomsState.value
     }
 
     /** The contact's @handle: one of our own accounts, or Instagram's username from the chat's people. */

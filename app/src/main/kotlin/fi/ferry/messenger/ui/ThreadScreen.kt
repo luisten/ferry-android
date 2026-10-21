@@ -38,13 +38,18 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
@@ -58,8 +63,10 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -114,25 +121,73 @@ fun ThreadScreen(roomID: String, back: () -> Unit) {
     val times = rememberThreadTimes()
     val list = rememberLazyListState()
     var reactionsOf by remember { mutableStateOf<Message?>(null) }
+    var draft by rememberSaveable(roomID, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    var replyingTo by remember(roomID) { mutableStateOf<Message?>(null) }
+    var editing by remember(roomID) { mutableStateOf<Message?>(null) }
+    val actions = MessageActions(
+        react = { key, message -> AppModel.react(key, message, room) },
+        reply = { editing = null; replyingTo = it },
+        edit = { replyingTo = null; editing = it; draft = TextFieldValue(it.body, TextRange(it.body.length)) },
+        unsend = { AppModel.unsend(it, room) },
+        retry = { AppModel.retry(it, room) },
+        discard = { AppModel.discard(it, room) },
+        readOnly = !Inbox.allowsReceipts(room),
+    )
+    fun send() {
+        val text = draft.text.trim()
+        if (text.isEmpty() || text.length > Timeline.MAX_TEXT_LENGTH) return
+        val edited = editing
+        if (edited != null) { if (text != edited.body) AppModel.edit(edited, text, room) } else AppModel.send(text, replyingTo?.eventID, room)
+        draft = TextFieldValue()
+        replyingTo = null
+        editing = null
+    }
 
     LaunchedEffect(roomID) { AppModel.openThread(room) } // the whole thread: reactions, edits, reply targets
     // On open and on each new message while it shows; the engine decides whether a "Seen" goes (unread, not a request).
     LaunchedEffect(room.events.lastOrNull()?.eventID) { AppModel.markRead(room) }
-    // A new message while at the end: follow it. ponytail: no hold on the "New messages" line yet; opens at the end.
-    LaunchedEffect(messages.lastOrNull()?.id, typing) { if (list.firstVisibleItemIndex <= 1) list.animateScrollToItem(0) }
+    // A new message while at the end, or our own: follow it. ponytail: no hold on the "New messages" line yet; opens at the end.
+    LaunchedEffect(messages.lastOrNull()?.id, typing) {
+        if (list.firstVisibleItemIndex <= 1 || messages.lastOrNull()?.isOwn == true) list.animateScrollToItem(0)
+    }
+    // The composer's typing state as it changes (the engine throttles it, never in a request); off when leaving.
+    // Derived, so a keystroke recomposes only the composer, not the whole thread.
+    val composing by remember(roomID) { derivedStateOf { draft.text.isNotEmpty() && editing == null } }
+    LaunchedEffect(composing) { AppModel.setTyping(composing, room) }
+    // Reply and Edit open the keyboard, as on iOS.
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(replyingTo, editing) { if (replyingTo != null || editing != null) { focus.requestFocus(); keyboard?.show() } }
+    DisposableEffect(roomID) { onDispose { AppModel.setTyping(false, room) } }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            // ponytail: no composer in a request yet; Accept, Delete and "Reply instead" come with A5.
+            if (!Inbox.isRequest(room)) {
+                Composer(
+                    draft, { draft = it }, identity, AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver },
+                    mode = editing?.let { ComposerMode.Editing } ?: replyingTo?.let { ComposerMode.Replying(people.firstName(it.sender), it.kind.media?.label ?: it.body) },
+                    cancel = { if (editing != null) draft = TextFieldValue(); replyingTo = null; editing = null },
+                    send = ::send,
+                    focus = focus,
+                )
+            }
+        },
+    ) { padding ->
         Box(Modifier.fillMaxSize()) {
             if (identity != null) {
                 Box(Modifier.fillMaxWidth().height(170.dp).background(Brush.verticalGradient(listOf(identity.color.wash, Color.Transparent))))
             }
             Column(Modifier.padding(padding)) {
                 ThreadHeader(room, identity, back)
+                AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
+                AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
                 LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
                     if (typing) item("typing") { TypingBubble(Modifier.padding(top = 10.dp, start = if (isGroup) GROUP_INDENT else 0.dp)) }
                     items(rows.asReversed(), key = { it.id }) { row ->
                         MessageRow(row, identity, people, isGroup, showsStatus = row.id == lastOwn,
-                            seenLine = if (row.id == seen?.id) seenLine else null, times = times, showReactions = { reactionsOf = it })
+                            seenLine = if (row.id == seen?.id) seenLine else null, times = times, actions = actions, showReactions = { reactionsOf = it })
                     }
                     item("top") { Top(room, identity, messages.isEmpty()) }
                 }
@@ -200,6 +255,7 @@ private fun MessageRow(
     showsStatus: Boolean,
     seenLine: String?,
     times: ThreadTimes,
+    actions: MessageActions,
     showReactions: (Message) -> Unit,
 ) {
     val message = row.message
@@ -236,7 +292,7 @@ private fun MessageRow(
                 }
                 Box(Modifier.fillMaxWidth(0.75f), contentAlignment = if (own) Alignment.BottomEnd else Alignment.BottomStart) {
                     Box(Modifier.padding(bottom = if (message.reactions.isEmpty()) 0.dp else 14.dp)) {
-                        Bubble(message, row.position, identity, people)
+                        MessageMenu(message, actions) { Bubble(message, row.position, identity, people) }
                         if (message.reactions.isNotEmpty()) {
                             ReactionPills(message, people, isGroup, Modifier.align(if (own) Alignment.BottomStart else Alignment.BottomEnd)
                                 .offset(x = if (own) (-8).dp else 8.dp, y = 14.dp)) { showReactions(message) }
@@ -248,7 +304,7 @@ private fun MessageRow(
                 Text("Edited", Modifier.padding(horizontal = 6.dp), style = MaterialTheme.typography.labelSmall, color = secondary)
             }
             when {
-                message.status is Message.Status.Failed -> Text("Not sent.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                message.status is Message.Status.Failed -> NotSent { actions.retry(message) }
                 showsStatus && message.kind != MessageKind.Unsent -> Text(
                     seenLine ?: when (message.status) {
                         Message.Status.Sending -> "Sending…"

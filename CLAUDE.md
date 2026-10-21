@@ -7,13 +7,15 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A3 (2026-10-21): the thread, read side (`ui/ThreadScreen.kt`: bubbles, group runs, replies, reactions,
-"Seen" and "Seen by", Instagram's own lines, the start block, older pages; media as labelled cards until A6). A2: the
+**Status:** A4 (2026-10-21): the thread, write side (`ui/Composer.kt`: the composer, the message menu; `AppModel`'s
+send, reply, react, edit, unsend, typing, with a local echo and "Not sent. Tap to retry"). A3: the thread, read side
+(`ui/ThreadScreen.kt`: bubbles, group runs, replies, reactions, "Seen" and "Seen by", Instagram's own lines, the start
+block, older pages; media as labelled cards until A6). A2: the
 inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card,
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. Sending comes with A4. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. Requests' Accept, Delete and Reply instead come with A5. The engine is pinned at 2eddfd3 (the iOS repo's PR #8, which added the bridge). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -100,6 +102,11 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   on each new message while it shows: the engine sends "Seen" only when the chat is unread and isn't a request. The
   thread's list is laid out from the bottom (`reverseLayout`), so it opens on the newest message and older pages land
   above it without moving it; its top item pages back (`IGOlder`, a read) only while it's on screen.
+- **Sending** shows the message at once (a `PendingMessage` whose transaction ID is the offline threading ID from
+  `IGNewOTID`, so Instagram's echo replaces it); a failure leaves "Not sent. Tap to retry" (the same ID again) or
+  Delete. React, edit and unsend wait for the echo instead; a failure shows as a notice. The menu (long press) offers
+  only what the engine allows: no reactions, edits or unsends in a request, Edit only within `Timeline.canEdit`.
+  Typing goes to the engine as it starts and stops; the engine throttles it and never sends it in a request.
 - **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
   only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name. Glyphs are a few
   Material Icons path strings in `ui/Icons.kt`, not a library. Profile pictures load https only, in memory (`Pictures`).
@@ -128,6 +135,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   decodes with kotlinx-serialization.
 - **kotlinx's `JsonPrimitive` answers `doubleOrNull`/`booleanOrNull` for strings too** ("12" is 12.0): the model's
   accessors (`string`, `number`, `long`, `bool` in Events.kt) check `isString` first, as Swift's `JSON` enum does.
+- **Don't read the composer's text in `ThreadScreen`'s body.** Each keystroke then recomposes the whole thread (the
+  timeline's reduce and layout, every bubble): ~200 ms a key on the emulator. Only the composer slot reads it; the
+  typing state is a `derivedStateOf`.
+- **"Isn't responding" on the emulator can be the Mac, not the app.** With the host loaded (load average 20–46, the
+  iOS simulator and builds alongside) the emulator swaps and the app waits for a CPU: an injected long press then
+  misses Android's 5 s input timeout. Each `uiautomator dump` also costs the app's main thread 0.4–7 s. Before
+  blaming the code: `uptime`, the ANR's `schedstat` (time waiting to run), and the main thread's CPU while idle
+  (`/proc/<pid>/task/<pid>/stat`, fields 14–15) should be ~0. Tap by coordinates from a screenshot, not by a dump.
 - Kotlin can't alias a nested enum or sealed type with a `val` (`val p = Timeline.GroupPosition`): import its values.
 - `--write-verification-metadata` prints "resolved during configuration time" warnings for every configuration:
   harmless, gone in a normal build.

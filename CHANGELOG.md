@@ -16,4 +16,7 @@ What changes for people who use the app, in plain words. The format is
 - Open a chat to read it: your messages in your account's colour, replies, reactions, edits, unsent messages, "Seen",
   and in groups who wrote what and who has seen it. Scroll up for older messages. Photos, videos and voice messages
   show as a label for now.
+- Write back: send a message, reply to one, react (long press, or double tap for a heart), edit within 15 minutes,
+  unsend, copy. Your message shows at once; if it can't be sent, tap it to try again. The other side sees when you're
+  typing.
 - Your login stays on this phone, encrypted, and out of backups.
