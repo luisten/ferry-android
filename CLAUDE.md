@@ -170,7 +170,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **Media** (A6, the iOS app's rules): cards download their file on a tap, never in the row's scope (a row scrolled
   away would cancel it), into `MediaFiles` (cache folder, Instagram's file names, https only, trimmed past 500 MB); a
   failed download reads the thread again (`IGReadChat`), since links expire. A card registers its tap with the
-  message's own gesture handler (`LocalTap`), so a long press on a photo still opens the menu. GIFs play three times
+  message's own gesture handler (`LocalTap`), so a long press on a photo still opens the menu; a card with its own tap
+  (each one of an opened set) takes the message's long press too (`TapTarget.hold`). GIFs play three times
   once per launch, stickers loop, neither in a request or with animations off (Android 9+, `AnimatedImageDrawable`).
 - **Sending media** (`Outgoing`): photos as JPEG (at most 2048 px, quality 85/70/50 until under 8,000,000 bytes; no
   metadata is copied); animated GIFs and WebPs as they are with their metadata cut out (`MediaClean`: no comments,

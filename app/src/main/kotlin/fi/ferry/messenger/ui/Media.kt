@@ -17,6 +17,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -114,13 +115,22 @@ val LocalMedia = compositionLocalOf<MediaContext?> { null }
 
 /**
  * A card's tap, run by the message's own gesture handler (`MessageMenu`), so a long press on a photo still opens the
- * menu: a card with a clickable of its own would take the whole gesture.
+ * menu: a card with a clickable of its own would take the whole gesture. One that needs its own (each card of an
+ * opened set) gets the message's long press as `hold`.
  */
 class TapTarget {
     var action: (() -> Unit)? = null
+    var hold: (() -> Unit)? = null
 }
 
 val LocalTap = compositionLocalOf<TapTarget?> { null }
+
+/** A card's own tap (in an opened set): holding it still opens the message's sheet, as everywhere in a bubble. */
+@Composable
+private fun Modifier.ownTap(action: () -> Unit): Modifier {
+    val hold = LocalTap.current?.hold
+    return combinedClickable(onLongClickLabel = hold?.let { "React or reply" }, onLongClick = hold, onClick = action)
+}
 
 @Composable
 private fun OnTap(action: () -> Unit) {
@@ -202,7 +212,7 @@ private fun PhotoCard(id: String, media: MediaInfo, sticker: Boolean, tapHere: B
         // A sticker has no card, once it's there: till then the same grey as a photo's.
         modifier.size(w, h).clip(RoundedCornerShape(if (sticker && still != null) 0.dp else 18.dp))
             .background(if (sticker && still != null) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant)
-            .then(if (tapHere) Modifier else Modifier.clickable(onClick = open))
+            .then(if (tapHere) Modifier else Modifier.ownTap(open))
             .semantics { contentDescription = if (sticker) "Sticker" else if (media.isAnimated) "GIF" else "Photo" },
         contentAlignment = Alignment.Center,
     ) {
@@ -357,7 +367,7 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
     }
     if (tapHere) OnTap(tap)
     val px = with(LocalDensity.current) { maxOf(w, h).roundToPx() }
-    Box(Modifier.size(w, h).clip(RoundedCornerShape(18.dp)).background(Color.Black).then(if (tapHere) Modifier else Modifier.clickable(onClick = tap))) {
+    Box(Modifier.size(w, h).clip(RoundedCornerShape(18.dp)).background(Color.Black).then(if (tapHere) Modifier else Modifier.ownTap(tap))) {
         Pictures.load(media.thumbnailURL, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         if (share != null) {
             val author = caption.author?.let { if (share.type == ShareType.STORY) "Story · @$it" else "@$it" } ?: share.type.label

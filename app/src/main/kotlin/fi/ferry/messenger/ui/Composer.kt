@@ -49,6 +49,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -122,6 +123,7 @@ class MessageActions(
 fun MessageMenu(message: Message, actions: MessageActions, content: @Composable () -> Unit) {
     var open by remember { mutableStateOf(false) }
     val tap = remember { TapTarget() }
+    SideEffect { tap.hold = { if (message.kind != MessageKind.Unsent) open = true } }
     var confirmUnsend by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val canSend = !actions.readOnly && message.eventID != null
