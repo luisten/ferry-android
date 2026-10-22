@@ -262,7 +262,7 @@ private fun AccountStackButton(open: () -> Unit) {
     val logins = AppModel.orderedAccounts
     val stack = Inbox.AccountStack(logins.map { Inbox.AccountStack.Account(it.id, AppModel.identities[it.id]?.name ?: it.displayName, it.health) })
     Row(
-        Modifier.heightIn(min = 44.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
+        Modifier.heightIn(min = 48.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface)
             .clickable(onClickLabel = "Open Accounts", onClick = open)
             .padding(horizontal = 7.dp, vertical = 7.dp)
             .clearAndSetSemantics { contentDescription = stack.accessibilityLabel; role = Role.Button },
@@ -302,18 +302,21 @@ private fun StatusBadge(status: Inbox.AccountStack.Status?, modifier: Modifier) 
 private fun FoldersMenu(menu: Inbox.FoldersMenu, open: (Folder) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton({ expanded = true }, Modifier.semantics { contentDescription = menu.accessibilityLabel }) {
-            Box {
-                Icon(Icons.folders, null)
-                if (menu.badge > 0) {
-                    // Label colour, not red: colour means account.
-                    Text(
-                        "${menu.badge}", Modifier.align(Alignment.TopEnd).offset(10.dp, (-8).dp)
-                            .background(MaterialTheme.colorScheme.background, CircleShape).padding(1.5.dp)
-                            .background(MaterialTheme.colorScheme.onBackground, CircleShape).padding(horizontal = 4.dp),
-                        color = MaterialTheme.colorScheme.background, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                    )
-                }
+        // As iOS: a white round button with a soft shadow, the count over the glyph's top-right corner.
+        Box(Modifier.size(52.dp)) {
+            Box(
+                Modifier.size(48.dp).align(Alignment.Center).shadow(6.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface)
+                    .clickable { expanded = true }.semantics { contentDescription = menu.accessibilityLabel; role = Role.Button },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.folders, null, Modifier.size(24.dp)) }
+            if (menu.badge > 0) {
+                // Label colour, not red: colour means account.
+                Text(
+                    "${menu.badge}", Modifier.align(Alignment.TopEnd).offset((-1).dp, 2.dp).clearAndSetSemantics {}
+                        .background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp)
+                        .background(MaterialTheme.colorScheme.onBackground, CircleShape).padding(horizontal = 5.dp),
+                    color = MaterialTheme.colorScheme.background, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                )
             }
         }
         DropdownMenu(expanded, { expanded = false }) {

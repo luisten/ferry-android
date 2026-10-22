@@ -172,7 +172,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   let go after a second, five minutes sends itself, leaving the thread or the app throws it away.
 - **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
   only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name. Glyphs are a few
-  Material Icons path strings in `ui/Icons.kt`, not a library. Profile pictures load https only, in memory (`Pictures`).
+  Material Icons path strings in `ui/Icons.kt`, not a library. iOS draws SF Symbols, which Apple licenses for its
+  platforms only: pick the closest Material icon (`tray.2` → `all_inbox`, outlined) and match the button around it. Profile pictures load https only, in memory (`Pictures`).
 - An account gets its default name, colour and mark (`AccountIdentity.withDefaults`) only once Instagram has said who
   it is (its viewer, kept in SharedPreferences with identities, Requests markers and the scope); else a stored
   account from before would be named by its ID for good.
