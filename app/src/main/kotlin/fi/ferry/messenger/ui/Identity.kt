@@ -64,18 +64,19 @@ fun AccountMark(identity: AccountIdentity, size: Dp, ring: Dp = 0.dp, inverted: 
     }
 }
 
-/** Capsule with the mark and the name: section headers, the thread's header (`compact`), banners. */
+/** Capsule with the mark and the name (and "· @handle"): section headers, the thread's header (`compact`), banners. */
 @Composable
-fun AccountTag(identity: AccountIdentity, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun AccountTag(identity: AccountIdentity, modifier: Modifier = Modifier, compact: Boolean = false, handle: String? = null) {
+    val style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge
     Row(
         modifier.background(identity.color.wash, CircleShape)
             .padding(start = if (compact) 2.dp else 3.dp, end = if (compact) 7.dp else 9.dp, top = 2.dp, bottom = 2.dp)
-            .clearAndSetSemantics { contentDescription = "${identity.name} account" },
+            .clearAndSetSemantics { contentDescription = "${identity.name} account" + handle?.let { ", @$it" }.orEmpty() },
         horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 5.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         AccountMark(identity, if (compact) 14.dp else 16.dp)
-        Text(identity.name, color = identity.color.ink, style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(identity.name, color = identity.color.ink, style = style, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        handle?.let { Text("· @$it", color = identity.color.ink, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     }
 }
 

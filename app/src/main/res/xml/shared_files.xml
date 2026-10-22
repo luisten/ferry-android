@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What Share can lend: full media files (MediaFiles) and our own on their way (Outgoing), nothing else of the cache. -->
+<paths>
+    <cache-path name="media" path="media/" />
+    <cache-path name="outgoing" path="outgoing/" />
+</paths>

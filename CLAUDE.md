@@ -7,7 +7,9 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** iOS 1.5 parity (2026-10-22): the iOS logo and launch screen; a chat that opens unread holds its "New
+**Status:** iOS 1.1–1.2's last gaps (2026-10-22): Chat Info (`ui/ChatInfo.kt`) and the person card, Share in the
+photo viewer and Share All, swipe to archive, pull to refresh, drag to reorder accounts; checked on the demo. With it
+Android has all of iOS 1.0–1.5. iOS 1.5 parity (2026-10-22): the iOS logo and launch screen; a chat that opens unread holds its "New
 messages" line; the jump-to-newest button; listening back to a voice note; the long press's reaction sheet with recent
 and any emoji; iOS's thread header, composer and inbox bottom bar. A8 (2026-10-22), first part: notifications by E8's option 1 (the user's choice: a foreground service,
 `EngineService`, keeps the engine connected while Ferry is closed; `Notifier`); checked on the demo. Still A8: days on a
@@ -152,9 +154,16 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   lets go. Only a send from this phone follows the end (`Message.isLocalEcho`). Demo: `--ez busy true`.
 - **The long press opens a sheet** (iOS 1.5): the message named in one line, `RecentReactions` (tested; stored in
   SharedPreferences, recorded when adding) and "+" (a field for the keyboard's emoji, `isEmoji`), then Reply, Copy,
-  Edit, Open in Instagram, Unsend/Delete, each run once the sheet is gone. Not yet: Share All for albums.
+  Edit, Share All (photos and videos sent together), Open in Instagram, Unsend/Delete, each run once the sheet is gone.
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
-  SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told.
+  SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told. A row
+  swiped left (`SwipeToDismissBox`, its grey only as wide as the swipe) or long-pressed archives or unarchives it.
+- **Chat Info** (iOS 1.2, DESIGN T3) is drawn over the thread, which stays composed underneath (its draft, its place,
+  its "Seen"), opened from the header capsule or ⋯. The person card (`PersonCard`) shows only what the thread brought:
+  nothing is asked of Instagram. Pull to refresh (inbox) and opening Accounts call `AppModel.restartSync`: an account
+  whose connect failed connects again (an IGResume each); connected and signed-out ones cost nothing.
+- **Share** goes through `FileProvider` (`${applicationId}.files`), which lends only `cache/media` and
+  `cache/outgoing` (`res/xml/shared_files.xml`), read-only, to the app the user picks.
 - **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,
   2 letters or more) and opens with `IGOpenDM`: our DM, else Instagram's (read once), else a draft until the first
   message. Its answer's `seq` says when the room is in (`AppModel.seqWaiters`).
@@ -223,6 +232,10 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   and waits: boot with `-crash-report-mode never -no-metrics`.
 - **Android sends BOOT_COMPLETED when a force-stopped app next starts**, not only at boot: the receiver started the
   service in the demo (with the emulator's stored session). The service stops itself when the app is the demo.
+- **The emulator's boot connects its stored live session** unless the app was force-stopped before the emulator shut
+  down (a stopped app gets no BOOT_COMPLETED): E8's service starts as on a phone. A boot after a demo session connected
+  a dummy for 70 s without a lock (4 requests, 2026-10-22). Force-stop after every session, the demo's too, and right
+  after a boot check `adb shell pidof fi.ferry.messenger`.
 - **A failed Instagram request is retried five times** (mautrix-meta's `MaxHTTPRetries`): Load story on an expired
   story cost 6 `reels_media` requests (2026-10-22). Count a failing call as six.
 - **The emulator's 2 GB can't hold it all** (system services, the app with Media3, the engine): it swaps and Android's

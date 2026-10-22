@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,7 +41,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,11 +53,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -61,6 +72,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import fi.ferry.messenger.AppModel
 import fi.ferry.messenger.model.AccountColor
 import fi.ferry.messenger.model.AccountIdentity
@@ -239,22 +251,63 @@ fun HealthLabel(health: Health) {
 
 /**
  * A1: your accounts with their state (and "Log in" when one is signed out), each opening its page (A2), and "Add
- * Instagram account". ponytail: no drag to reorder the scope bar yet (Compose has no reorderable list built in).
+ * Instagram account". Touch and hold an account, then drag, to reorder the scope bar (TalkBack: Move up, Move down).
+ * Opening it reconnects an account that failed, as on iOS (pulling down closes a sheet here, so no pull to refresh).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountsSheet(dismiss: () -> Unit, addAccount: () -> Unit, open: (String) -> Unit, relogin: (String) -> Unit) {
+    LaunchedEffect(Unit) { AppModel.restartSync() }
+    val accounts = AppModel.orderedAccounts
+    // The order while a drag moves it; saved when it's let go.
+    var order by remember(accounts.map { it.id }) { mutableStateOf(accounts.map { it.id }) }
+    var dragging by remember { mutableStateOf<String?>(null) }
+    var dragY by remember { mutableFloatStateOf(0f) }
+    val heights = remember { mutableStateMapOf<String, Int>() }
+    fun move(id: String, by: Int) {
+        val i = order.indexOf(id)
+        if (i + by !in order.indices) return
+        order = order.toMutableList().apply { add(i + by, removeAt(i)) }
+    }
     ModalBottomSheet(dismiss, containerColor = MaterialTheme.colorScheme.background) {
         Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
             Text("Instagram accounts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(12.dp))
             if (AppModel.accounts.isEmpty()) Text("No accounts yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            for (login in AppModel.orderedAccounts) {
+            for (login in order.mapNotNull { id -> accounts.firstOrNull { it.id == id } }) key(login.id) {
+                val id = login.id
                 val identity = AppModel.identities[login.id]
                 val health = login.health
                 val name = identity?.name ?: login.displayName
+                val lifted = dragging == id
+                val reorder = if (accounts.size < 2) Modifier else Modifier
+                    .pointerInput(id) {
+                        // A row moves past its neighbour once it's half over it; the finger keeps its place on the row.
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { dragging = id; dragY = 0f },
+                            onDrag = { _, amount ->
+                                dragY += amount.y
+                                val h = heights[id] ?: 0
+                                if (h > 0 && dragY > h / 2 && order.last() != id) { move(id, 1); dragY -= h }
+                                if (h > 0 && dragY < -h / 2 && order.first() != id) { move(id, -1); dragY += h }
+                            },
+                            onDragEnd = { dragging = null; dragY = 0f; AppModel.moveAccounts(order) },
+                            onDragCancel = { dragging = null; dragY = 0f; AppModel.moveAccounts(order) },
+                        )
+                    }
+                    .semantics {
+                        customActions = listOfNotNull(
+                            CustomAccessibilityAction("Move up") { move(id, -1); AppModel.moveAccounts(order); true }.takeIf { order.first() != id },
+                            CustomAccessibilityAction("Move down") { move(id, 1); AppModel.moveAccounts(order); true }.takeIf { order.last() != id },
+                        )
+                    }
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { open(login.id) }.padding(vertical = 8.dp)
+                    Modifier.zIndex(if (lifted) 1f else 0f).onSizeChanged { heights[id] = it.height }
+                        .graphicsLayer { translationY = if (lifted) dragY else 0f }
+                        .then(if (lifted) Modifier.shadow(8.dp, RoundedCornerShape(12.dp)) else Modifier)
+                        .fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.background)
+                        // The drag inside the click sees the touch first and takes a long press's release: letting go opens nothing.
+                        .clickable { open(login.id) }.then(reorder).padding(vertical = 8.dp)
                         .semantics(mergeDescendants = true) {},
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -273,7 +326,8 @@ fun AccountsSheet(dismiss: () -> Unit, addAccount: () -> Unit, open: (String) ->
             }
             Spacer(Modifier.height(12.dp))
             Button(addAccount, Modifier.fillMaxWidth()) { Text("Add Instagram account") }
-            Text("Each chat stays tied to the account it belongs to.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall,
+            Text(if (accounts.size > 1) "Each chat stays tied to the account it belongs to. Touch and hold an account, then drag to reorder the scope bar."
+                else "Each chat stays tied to the account it belongs to.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (AppModel.accounts.isNotEmpty() && !AppModel.demo) BackgroundRow()
         }

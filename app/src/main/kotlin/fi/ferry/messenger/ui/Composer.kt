@@ -88,6 +88,7 @@ import fi.ferry.messenger.VoiceRecorder
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.Inbox
+import fi.ferry.messenger.model.MediaInfo
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessageKind
 import fi.ferry.messenger.model.RecentReactions
@@ -108,6 +109,8 @@ class MessageActions(
     val readOnly: Boolean,
     /** "You", or a sender's first name: the sheet's line naming the message. */
     val firstName: (String) -> String = { it },
+    /** Photos and videos sent together: all of them to Android's share sheet. */
+    val shareAll: ((Message) -> Unit)? = null,
 )
 
 /**
@@ -196,6 +199,10 @@ private fun MessageSheet(
                 if (canSend) SheetRow(Icons.reply, "Reply") { then { actions.reply(message) } }
                 copyable?.let { text -> SheetRow(Icons.copy, "Copy") { copy(context, text); then {} } }
                 if (!actions.readOnly && Timeline.canEdit(message)) SheetRow(Icons.edit, "Edit") { then { actions.edit(message) } }
+                val album = MediaInfo(message.content)
+                if (album.album.size > 1 && actions.shareAll != null) {
+                    SheetRow(Icons.share, "Share All", detail = album.albumLabel) { then { actions.shareAll.invoke(message) } }
+                }
                 message.content["external_url"].string?.takeIf { it.startsWith("https://") }?.let { url ->
                     SheetRow(Icons.openOutside, "Open in Instagram") {
                         then { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
@@ -212,12 +219,16 @@ private fun MessageSheet(
 }
 
 @Composable
-private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, destructive: Boolean = false, action: () -> Unit) {
+private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, detail: String? = null, destructive: Boolean = false,
+                     action: () -> Unit) {
     val color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground
-    Row(Modifier.fillMaxWidth().clickable(onClick = action).heightIn(min = 50.dp).padding(horizontal = 16.dp),
+    Row(Modifier.fillMaxWidth().clickable(onClick = action).heightIn(min = 50.dp).padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Icon(icon, null, Modifier.size(24.dp), tint = color)
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
+        Column {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
+            detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
     }
 }
 

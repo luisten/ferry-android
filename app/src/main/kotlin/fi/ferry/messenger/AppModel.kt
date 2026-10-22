@@ -234,6 +234,22 @@ object AppModel {
         write(IDENTITIES, identities)
     }
 
+    /**
+     * Pull to refresh, and opening Accounts (iOS's restartSync): an account whose connection failed for a passing
+     * reason connects again, an Instagram launch each (IGResume). Connected ones cost nothing; signed-out ones wait for
+     * their login.
+     */
+    fun restartSync() {
+        if (demo) return
+        for ((id, status) in statuses.toList()) if (id !in running && status.state != "BAD_CREDENTIALS" && status.state != "LOGGED_OUT") connect(id)
+    }
+
+    /** Drag to reorder in Accounts: the scope bar's and the stack's order. */
+    fun moveAccounts(ids: List<String>) {
+        identities = AccountIdentity.reordered(identities, ids)
+        write(IDENTITIES, identities)
+    }
+
     fun selectScope(scope: Inbox.Scope) {
         scopeKey = scope.key
         if (!demo) prefs.edit().putString(SCOPE, scopeKey).apply()

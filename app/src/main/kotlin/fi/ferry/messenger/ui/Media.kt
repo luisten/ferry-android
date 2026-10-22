@@ -1,5 +1,8 @@
 package fi.ferry.messenger.ui
 
+import android.content.ClipData
+import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.graphics.drawable.AnimatedImageDrawable
@@ -8,6 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.webkit.MimeTypeMap
 import android.widget.ImageView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -76,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -291,6 +296,9 @@ private fun AlbumPile(message: Message, media: MediaInfo) {
         }
         Text(media.albumLabel, Modifier.align(Alignment.BottomStart).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
             .padding(horizontal = 10.dp, vertical = 4.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+        // "Share All" under way: the set's downloads so far.
+        val downloading = items.mapNotNull { item -> item.url?.let { MediaFiles.progress[it] } }
+        if (downloading.isNotEmpty()) Box(Modifier.align(Alignment.Center)) { Overlay(downloading.average().toFloat(), failed = false) }
     }
 }
 
@@ -516,14 +524,39 @@ fun MediaViewer(viewer: Viewer, dismiss: () -> Unit) {
                 is Viewer.Photo -> PhotoView(viewer)
                 is Viewer.Video -> VideoView(viewer.file)
             }
-            IconButton(dismiss, Modifier.align(Alignment.TopStart).statusBarsPadding().padding(4.dp)) {
+            // On a dark circle, as iOS 1.3: white alone vanishes over a bright photo.
+            val round = Modifier.statusBarsPadding().padding(12.dp).size(44.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape)
+            IconButton(dismiss, Modifier.align(Alignment.TopStart).then(round)) {
                 Icon(Icons.close, "Close", tint = Color.White)
+            }
+            // As iOS: a photo has Share, a video none.
+            if (viewer is Viewer.Photo) {
+                val context = LocalContext.current
+                IconButton({ share(context, listOf(viewer.file)) }, Modifier.align(Alignment.TopEnd).then(round)) {
+                    Icon(Icons.share, "Share", tint = Color.White)
+                }
             }
         }
     }
 }
 
-// ponytail: no swipe to dismiss or Share yet; Back and ✕ close it.
+/** Android's share sheet for media files of ours (the cache's, through `FileProvider`): one, or a set ("Share All"). */
+fun share(context: Context, files: List<File>) {
+    if (files.isEmpty()) return
+    val uris = files.map { FileProvider.getUriForFile(context, "${context.packageName}.files", it) }
+    val types = files.map { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it.extension) ?: "application/octet-stream" }
+    // One type, else "image/*" for photos of several types, else anything.
+    val type = types.distinct().singleOrNull() ?: types.map { it.substringBefore('/') }.distinct().singleOrNull()?.let { "$it/*" } ?: "*/*"
+    val send = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+        else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+    send.type = type
+    // Read access for whichever app is picked, and the sheet's previews.
+    send.clipData = ClipData.newRawUri(null, uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
+    send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    context.startActivity(Intent.createChooser(send, null))
+}
+
+// ponytail: no swipe to dismiss yet; Back and ✕ close it.
 @Composable
 private fun PhotoView(viewer: Viewer.Photo) {
     var scale by remember { mutableFloatStateOf(1f) }

@@ -40,3 +40,11 @@ What changes for people who use the app, in plain words. The format is
 - Touch and hold a message for big buttons with the reactions you used last, and "+" for any emoji.
 - Search sits at the bottom of the inbox, next to the new-message button.
 - Your login stays on this phone, encrypted, and out of backups.
+- Chat Info: tap a chat's name at the top to see which of your accounts it belongs to, a group's members, their
+  Instagram profiles, and Archive.
+- Tap someone's picture in a group chat, or a member in Chat Info, to see a bigger picture, their name and @handle, and
+  open their Instagram profile.
+- Share a photo from the full-screen viewer. Photos and videos sent together have Share All: touch and hold them.
+- Swipe a chat left to archive it, or to bring it back from Archived.
+- Pull down the chat list to reconnect an account that couldn't connect.
+- Touch and hold an account in Accounts, then drag it, to change their order.

@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,19 +31,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +60,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -72,8 +81,10 @@ import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.Inbox.Folder
 import fi.ferry.messenger.model.Room
 import java.time.ZoneId
+import kotlinx.coroutines.launch
 
 /** I1, the inbox (DESIGN §4, I1): account stack, title, Folders menu, scope bar, the Requests card, chat rows. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InboxScreen(
     openThread: (String) -> Unit,
@@ -141,7 +152,8 @@ fun InboxScreen(
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
                 val times = rememberTimeFormats()
-                LazyColumn(Modifier.fillMaxSize()) {
+                // As iOS: pulling down reconnects an account that failed (nothing for connected ones).
+                PullToRefreshBox(false, AppModel::restartSync, Modifier.fillMaxSize()) { LazyColumn(Modifier.fillMaxSize()) {
                     if (newRequests.isNotEmpty()) {
                         item(key = "requests") { RequestsCard(newRequests, scope == Inbox.Scope.All && multiAccount) { openFolder(Folder.REQUESTS, scope) } }
                     }
@@ -153,7 +165,7 @@ fun InboxScreen(
                     } else {
                         items(8) { PlaceholderRow() }
                     }
-                }
+                } }
             }
             if (AppModel.initialSyncDone && list.isEmpty() && newRequests.isEmpty()) {
                 when {
@@ -166,8 +178,8 @@ fun InboxScreen(
 }
 
 /**
- * DESIGN I1/I4: a row's long press offers Archive, or Unarchive in Archived (for TalkBack, an action). Requests have
- * neither: they stay in Requests either way. ponytail: no swipe to archive yet; the long press covers it.
+ * DESIGN I1/I4: a row swiped left, or its long press, archives it, or unarchives it in Archived (for TalkBack, an
+ * action). Requests have neither: they stay in Requests either way.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -178,11 +190,31 @@ fun ArchiveActions(room: Room, open: () -> Unit, row: @Composable (Modifier) -> 
     val archived = folder == Folder.ARCHIVED
     val label = if (archived) "Unarchive" else "Archive"
     val act = { menu = false; AppModel.setArchived(!archived, room) }
-    Box {
-        row(Modifier.combinedClickable(onClick = open, onLongClick = { menu = true })
-            .semantics { customActions = listOf(CustomAccessibilityAction(label) { act(); true }) })
-        DropdownMenu(menu, { menu = false }, offset = DpOffset(86.dp, 0.dp)) {
-            DropdownMenuItem({ Text(label) }, act, leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
+    val swipe = rememberSwipeToDismissBoxState()
+    val scope = rememberCoroutineScope()
+    // As iOS's full swipe: past the threshold it's done, and the row leaves the list (it snaps back if it stays).
+    SwipeToDismissBox(swipe, { SwipeAction(swipe, label, if (archived) Icons.unarchive else Icons.archive) }, enableDismissFromStartToEnd = false,
+        onDismiss = { act(); scope.launch { swipe.reset() } }) {
+        Box {
+            row(Modifier.combinedClickable(onClick = open, onLongClick = { menu = true })
+                .semantics { customActions = listOf(CustomAccessibilityAction(label) { act(); true }) })
+            DropdownMenu(menu, { menu = false }, offset = DpOffset(86.dp, 0.dp)) {
+                DropdownMenuItem({ Text(label) }, act, leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
+            }
+        }
+    }
+}
+
+/** What a left swipe uncovers, at the row's right: grey, never an account's colour. Only as wide as the swipe, so the
+ * row's own background (the scope's wash) stays. */
+@Composable
+private fun RowScope.SwipeAction(swipe: SwipeToDismissBoxState, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    val width = with(LocalDensity.current) { (-runCatching { swipe.requireOffset() }.getOrDefault(0f)).coerceAtLeast(0f).toDp() }
+    Spacer(Modifier.weight(1f))
+    Box(Modifier.fillMaxHeight().width(width).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+        if (width > 64.dp) Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Icon(icon, null, Modifier.size(22.dp))
+            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
         }
     }
 }

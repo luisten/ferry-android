@@ -1,9 +1,7 @@
 package fi.ferry.messenger.ui
 
-import android.content.Intent
 import android.icu.lang.UCharacter
 import android.icu.lang.UProperty
-import android.net.Uri
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -95,12 +93,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.ferry.messenger.AppModel
+import fi.ferry.messenger.MediaFiles
 import fi.ferry.messenger.Outgoing
 import fi.ferry.messenger.VoicePlayer
 import fi.ferry.messenger.VoiceRecorder
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.LinkPreview
+import fi.ferry.messenger.model.MediaInfo
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessageKind
 import fi.ferry.messenger.model.Room
@@ -112,9 +112,14 @@ import fi.ferry.messenger.model.parseURL
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** DESIGN §6.1 groups: the sender's 28 dp avatar beside the last bubble of a run, and the indent it leaves. */
 private val GROUP_AVATAR = 28.dp
@@ -150,6 +155,8 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     val times = rememberThreadTimes()
     val list = rememberLazyListState()
     var reactionsOf by remember { mutableStateOf<Message?>(null) }
+    var info by remember(roomID) { mutableStateOf(false) }
+    var person by remember { mutableStateOf<String?>(null) }
     var draft by rememberSaveable(roomID, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     var replyingTo by remember(roomID) { mutableStateOf<Message?>(null) }
     var editing by remember(roomID) { mutableStateOf<Message?>(null) }
@@ -170,6 +177,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     var confirmingDelete by remember(roomID) { mutableStateOf(false) }
     val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
     val bar = Inbox.threadBar(room, login?.health, replyingInstead)
+    val scope = rememberCoroutineScope()
     val actions = MessageActions(
         react = { key, message -> AppModel.react(key, message, room) },
         reply = { editing = null; replyingTo = it },
@@ -179,6 +187,17 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
         discard = { AppModel.discard(it, room) },
         readOnly = !Inbox.allowsReceipts(room),
         firstName = { people.firstName(it) },
+        // iOS 1.1: every photo and video of the set at once (the pile shows the downloads), then the share sheet.
+        shareAll = { message ->
+            val items = MediaInfo(message.content).album.map(::MediaInfo)
+            val local = items.map { item -> item.url?.let(AppModel::localFile) }
+            scope.launch {
+                val files = withContext(Dispatchers.IO) {
+                    coroutineScope { items.mapIndexed { i, item -> async { local[i] ?: item.url?.let { MediaFiles.download(it, item.mimetype) } } }.awaitAll() }
+                }
+                if (files.all { it != null }) share(context, files.filterNotNull()) else AppModel.refreshMedia(room) // the links may have expired
+            }
+        },
     )
     fun send() {
         val text = draft.text.trim()
@@ -240,7 +259,6 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     var jumpSince by remember(roomID) { mutableStateOf<Long?>(null) }
     val showsJump = revealed && far && (jumpSince != null || holdsLine || !list.isScrollInProgress)
     LaunchedEffect(showsJump) { jumpSince = if (showsJump) jumpSince ?: room.lastActivity else null }
-    val scope = rememberCoroutineScope()
     // The composer's typing state as it changes (the engine throttles it, never in a request); off when leaving.
     // Derived, so a keystroke recomposes only the composer, not the whole thread.
     val composing by remember(roomID) { derivedStateOf { draft.text.isNotEmpty() && editing == null } }
@@ -308,9 +326,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                 Box(Modifier.fillMaxWidth().height(170.dp).background(Brush.verticalGradient(listOf(identity.color.wash, Color.Transparent))))
             }
             Column(Modifier.padding(padding)) {
-                ThreadHeader(room, identity, back) {
-                    if (Inbox.folder(room) != Inbox.Folder.REQUESTS) MoreMenu(room)
-                }
+                ThreadHeader(room, identity, back, openInfo = { info = true }) { MoreMenu(room) { info = true } }
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
                 CompositionLocalProvider(LocalMedia provides media) { Box(Modifier.fillMaxSize()) {
@@ -319,7 +335,8 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                         if (typing) item("typing") { TypingBubble(Modifier.padding(top = 10.dp, start = if (isGroup) GROUP_INDENT else 0.dp)) }
                         items(rows.asReversed(), key = { it.id }) { row ->
                             MessageRow(row, identity, people, isGroup, showsStatus = row.id == lastOwn,
-                                seenLine = if (row.id == seen?.id) seenLine else null, times = times, actions = actions, showReactions = { reactionsOf = it })
+                                seenLine = if (row.id == seen?.id) seenLine else null, times = times, actions = actions, showReactions = { reactionsOf = it },
+                                showPerson = { person = it })
                         }
                         item("top") { Top(room, identity, messages.isEmpty()) }
                     }
@@ -338,6 +355,8 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     reactionsOf?.let { message ->
         ModalBottomSheet({ reactionsOf = null }, containerColor = MaterialTheme.colorScheme.background) { ReactionList(message, people) }
     }
+    if (info) ChatInfoScreen(room) { info = false }
+    person?.let { user -> PersonCard(people.name(user), profiles[user]?.handle, people.avatar(user)) { person = null } }
     viewer?.let { MediaViewer(it) { viewer = null } }
     if (confirmingDelete) {
         AlertDialog(
@@ -353,23 +372,25 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     }
 }
 
-/** DESIGN T1's ⋯ menu, its v1 part: Open in Instagram (once the handle is known) and Archive or Unarchive. */
+/** DESIGN T1's ⋯ menu, its v1 part: Chat Info, Open in Instagram (once the handle is known) and Archive or Unarchive. */
 @Composable
-private fun MoreMenu(room: Room) {
+private fun MoreMenu(room: Room, openInfo: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val archived = Inbox.folder(room) == Inbox.Folder.ARCHIVED
+    val folder = Inbox.folder(room)
+    val archived = folder == Inbox.Folder.ARCHIVED
     Box {
         IconButton({ open = true }) { Icon(Icons.more, "More") }
         DropdownMenu(open, { open = false }) {
+            DropdownMenuItem({ Text("Chat Info") }, { open = false; openInfo() }, leadingIcon = { Icon(Icons.info, null) })
             AppModel.contactHandle(room)?.let { handle ->
-                DropdownMenuItem({ Text("Open in Instagram") }, {
-                    open = false
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.instagram.com/$handle/")))
-                }, leadingIcon = { Icon(Icons.openOutside, null) })
+                DropdownMenuItem({ Text("Open in Instagram") }, { open = false; openProfile(context, handle) },
+                    leadingIcon = { Icon(Icons.openOutside, null) })
             }
-            DropdownMenuItem({ Text(if (archived) "Unarchive" else "Archive") }, { open = false; AppModel.setArchived(!archived, room) },
-                leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
+            if (folder != Inbox.Folder.REQUESTS) { // requests stay in Requests
+                DropdownMenuItem({ Text(if (archived) "Unarchive" else "Archive") }, { open = false; AppModel.setArchived(!archived, room) },
+                    leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
+            }
         }
     }
 }
@@ -382,16 +403,17 @@ private class People(val room: Room, val profiles: Map<String, UserProfile>) {
     fun firstName(user: String) = if (user == AppModel.ME) "You" else name(user).split(' ').firstOrNull { it.isNotEmpty() } ?: name(user)
 }
 
-/** One glass-free capsule's worth: back, the contact, and under the name the account this chat belongs to. */
+/** One glass-free capsule's worth: back, the contact, and under the name the account this chat belongs to. A tap: Chat Info. */
 @Composable
-private fun ThreadHeader(room: Room, identity: AccountIdentity?, back: () -> Unit, actions: @Composable () -> Unit) {
+private fun ThreadHeader(room: Room, identity: AccountIdentity?, back: () -> Unit, openInfo: () -> Unit, actions: @Composable () -> Unit) {
     // As iOS: back and ⋯ in round buttons, the contact and the account's tag in a capsule between them.
     Box(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp)) {
         Box(Modifier.align(Alignment.CenterStart).size(44.dp).shadow(4.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface)
             .clickable(onClickLabel = "Back", onClick = back), contentAlignment = Alignment.Center) { Icon(Icons.back, "Back") }
         Row(
             Modifier.align(Alignment.Center).padding(horizontal = 56.dp).heightIn(min = 48.dp).shadow(4.dp, CircleShape).clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface).padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp)
+                .background(MaterialTheme.colorScheme.surface).clickable(onClickLabel = "Show chat info", onClick = openInfo)
+                .padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp)
                 .semantics(mergeDescendants = true) { heading() },
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -441,6 +463,7 @@ private fun MessageRow(
     times: ThreadTimes,
     actions: MessageActions,
     showReactions: (Message) -> Unit,
+    showPerson: (String) -> Unit,
 ) {
     val message = row.message
     val own = message.isOwn
@@ -470,7 +493,10 @@ private fun MessageRow(
             Row(verticalAlignment = Alignment.Bottom) {
                 row.groupSender?.let { sender ->
                     Box(Modifier.size(GROUP_AVATAR).offset(y = if (message.reactions.isEmpty()) 0.dp else (-14).dp)) {
-                        if (sender.showsAvatar) Picture(people.avatar(message.sender), people.name(message.sender), GROUP_AVATAR)
+                        if (sender.showsAvatar) Box(Modifier.clip(CircleShape).clickable(onClickLabel = "Show who they are") { showPerson(message.sender) }
+                            .semantics { contentDescription = people.name(message.sender) }) {
+                            Picture(people.avatar(message.sender), people.name(message.sender), GROUP_AVATAR)
+                        }
                     }
                     Spacer(Modifier.width(6.dp))
                 }
