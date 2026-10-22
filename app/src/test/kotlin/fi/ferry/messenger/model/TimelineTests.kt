@@ -171,6 +171,20 @@ class TimelineTests {
         assertEquals(listOf(false, true, true), messages.map { it.isLocalEcho })
     }
 
+    /** A8: only a new message from someone else notifies; not ours, an edit, a reaction or what came before launch. */
+    @Test fun notifiableMessages() {
+        val since = 100L
+        val events = listOf(
+            message("\$new", 200, sender = ghost),
+            message("\$old", 50, sender = ghost),
+            message("\$mine", 200, sender = me),
+            Event("m.room.message", obj("msgtype" to "m.text", "body" to "* fixed", "m.relates_to" to mapOf("rel_type" to "m.replace", "event_id" to "\$new")),
+                "\$edit", ghost, originServerTS = 210),
+            reaction("\$r", "\$new", "❤", ghost, ts = 220),
+        )
+        assertEquals(listOf("\$new"), Timeline.notifiable(events, me, since).map { it.eventID })
+    }
+
     /** The jump-to-newest button's count: what others sent after it appeared, never ours, chat lines or unsent ones. */
     @Test fun newCountIsOnlyWhatOthersSentSince() {
         fun message(id: String, ts: Long, own: Boolean = false, kind: MessageKind = MessageKind.Text) =

@@ -1,11 +1,13 @@
 package fi.ferry.messenger
 
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,11 +19,17 @@ import fi.ferry.messenger.ui.FolderScreen
 import fi.ferry.messenger.ui.InboxScreen
 import fi.ferry.messenger.ui.NameAccountScreen
 import fi.ferry.messenger.ui.NewMessageScreen
+import fi.ferry.messenger.ui.NotificationsPrompt
 import fi.ferry.messenger.ui.ReloginDialog
 import fi.ferry.messenger.ui.ThreadScreen
 import fi.ferry.messenger.ui.Welcome
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** A notification's chat. */
+        const val OPEN_ROOM = "fi.ferry.messenger.room"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -33,13 +41,27 @@ class MainActivity : ComponentActivity() {
         AppModel.start(applicationContext, demo, requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable },
             demoSignedOut = demo && intent.getBooleanExtra("signed_out", false),
             // A live account shown signed out (nothing reaches Instagram) until it logs in again: A3's live check.
-            signedOut = intent.getStringExtra("signed_out_account")?.takeIf { debuggable && !demo })
+            signedOut = intent.getStringExtra("signed_out_account")?.takeIf { debuggable && !demo },
+            demoIncoming = demo && intent.getBooleanExtra("incoming", false))
+        AppModel.openRoom = intent.getStringExtra(OPEN_ROOM)
         if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
         setContent { FerryTheme { App() } }
     }
 
+    /** A notification tapped while Ferry was open (`singleTop`). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra(OPEN_ROOM)?.let { AppModel.openRoom = it }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppModel.foreground = true
+    }
+
     override fun onStop() {
         super.onStop()
+        AppModel.foreground = false
         VoiceRecorder.cancel() // a note isn't recorded in the background (as on iOS)
         VoicePlayer.stop()
         AppModel.save()
@@ -60,6 +82,14 @@ private sealed interface Screen {
 @Composable
 private fun App() {
     var stack by remember { mutableStateOf(listOf<Screen>(Screen.Inbox)) }
+    // A notification's chat, over the inbox.
+    val openRoom = AppModel.openRoom
+    LaunchedEffect(openRoom) {
+        if (openRoom != null) {
+            stack = listOf(Screen.Inbox, Screen.Thread(openRoom))
+            AppModel.openRoom = null
+        }
+    }
     var accountsOpen by remember { mutableStateOf(false) }
     var reloginOf by remember { mutableStateOf<String?>(null) }
     fun push(screen: Screen) {
@@ -103,4 +133,5 @@ private fun App() {
         relogin = { accountsOpen = false; reloginOf = it },
     )
     reloginOf?.let { id -> ReloginDialog(id, dismiss = { reloginOf = null }) { push(Screen.Login(relogin = id)) } }
+    if (AppModel.accounts.isNotEmpty() && naming == null) NotificationsPrompt()
 }

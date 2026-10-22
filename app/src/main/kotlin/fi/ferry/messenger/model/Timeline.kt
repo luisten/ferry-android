@@ -454,6 +454,15 @@ object Timeline {
     }
 
     /**
+     * A live update's messages worth a notification (A8): from someone else, not an edit, newer than `since` (the
+     * process's start: older ones were there at launch or came with history).
+     */
+    fun notifiable(events: List<Event>, me: String, since: Long): List<Event> = events.filter { e ->
+        (e.type == "m.room.message" || e.type == "m.sticker") && e.sender != me && e.eventID != null &&
+            e.content["m.relates_to"]["rel_type"].string != "m.replace" && (e.originServerTS ?: 0) > since
+    }
+
+    /**
      * The jump-to-newest button's count: messages from others (no chat events or tombstones) newer than `ms`, the
      * newest message's time when the button appeared.
      */

@@ -65,6 +65,10 @@ object Demo {
         priya to UserProfile("Priya Nair", handle = "priya.n"),
     )
 
+    /** A message from Noor, now: the demo's live update (`--ez incoming true`). */
+    fun incoming(now: Long): Pair<String, Event> =
+        "!debug-demo-1" to text("\$debug-incoming-$now", IGAdapter.user(chats[0].fbid), now, "Running 5 min late, save me a seat!")
+
     /** New Message's search: the made-up people whose name or handle has `query` (their DMs open; the group's don't). */
     fun contacts(query: String): List<BridgeAPI.Contact> = profiles.mapNotNull { (user, p) ->
         val q = query.trim().lowercase()

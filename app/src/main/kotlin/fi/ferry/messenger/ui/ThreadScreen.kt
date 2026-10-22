@@ -206,7 +206,15 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
             keyboard?.show()
         }
     }
-    DisposableEffect(roomID) { onDispose { AppModel.setTyping(false, room); VoicePlayer.stop(); VoiceRecorder.cancel() } }
+    DisposableEffect(roomID) {
+        // On screen: no notification for it, and any there was goes.
+        AppModel.visibleRoom = roomID
+        fi.ferry.messenger.Notifier.clear(context, roomID)
+        onDispose {
+            if (AppModel.visibleRoom == roomID) AppModel.visibleRoom = null
+            AppModel.setTyping(false, room); VoicePlayer.stop(); VoiceRecorder.cancel()
+        }
+    }
     var viewer by remember { mutableStateOf<Viewer?>(null) }
     // GIFs play in a chat, not in a request (nothing there should move before it's accepted).
     val media = MediaContext(room, autoplay = !Inbox.isRequest(room)) { viewer = it }

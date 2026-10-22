@@ -5,7 +5,7 @@ Your Instagram messages in a calm app of their own: the chats, without the feed.
 
 **Not ready yet.** Today it logs in, shows your inbox (your chats from every account, requests and folders) and lets
 you read and answer your chats, message requests included, start new ones, and send and see photos, videos and voice
-messages. There's no download to install; this page will say when there is.
+messages, with notifications. There's no download to install; this page will say when there is.
 
 ## How it works
 

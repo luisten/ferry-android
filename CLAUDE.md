@@ -7,7 +7,9 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A7 (2026-10-22): accounts (`ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
+**Status:** A8 (2026-10-22), first part: notifications by E8's option 1 (the user's choice: a foreground service,
+`EngineService`, keeps the engine connected while Ferry is closed; `Notifier`); checked on the demo. Still A8: days on a
+real phone for battery and phone makers' battery savers, and whether Instagram minds the connection. A7: accounts (`ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
 another account?" after the first, the identity editor, each account's page with Remove Account, the signed-out
 prompt and bar, the inbox's banner; `AppModel.login(relogin)` refuses a different account). A6 and A7 checked live
 2026-10-22 (re-login, a photo and a voice note to kivostudio, the viewer, Load story on an expired story). A6: media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
@@ -23,7 +25,7 @@ inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. Notifications (E8, the user's call) and a real phone come with A8. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. A signed APK and the friends' install guide come with A9. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
@@ -77,7 +79,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   logs counts and account IDs only, the engine's own log goes to stderr (`/dev/null` in an app).
 - **One live user of the dummies at a time.** Other sessions (the iOS app's) test with the same accounts: before a
   live check, message them "LOCK: <accounts>, <what>, <expected requests>" and wait for "OK"; afterwards send
-  "RELEASED" (and background or stop the app, so its client disconnects). Answer theirs the same way.
+  "RELEASED" (and force-stop the app, `adb shell am force-stop fi.ferry.messenger`: since A8 its service stays
+  connected in the background). Answer theirs the same way.
 - **Check screens on the demo first** (`--ez demo true`, `Demo.kt`, debug builds only): the iOS app's made-up accounts,
   chats, requests and group; the engine isn't even loaded, so it costs no Instagram action.
 - **Live checks use the two dummies only** (stand-ins `tamoveska` personal, `kivostudio` professional; real names only
@@ -129,6 +132,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   "Later" hides it until it changes; a signed-out account's chats get `RecoveryBar` instead of the composer.
   Demo switches: `--ez signed_out true` (Kivo signed out), `--ez naming true` (O5 for Tamo); live, `--es
   signed_out_account <id>` shows that account signed out (locally, nothing sent) until it logs in again (A3's check).
+- **Notifications** (E8 = option 1, 2026-10-22; option 3, a relay and FCM shared with iOS, is the later decision):
+  `EngineService` (type `remoteMessaging`, started with the first account, at boot, stopped with the last one; never
+  in the demo) holds the process, and so the engine's connections, with a silent "Connected" notification. A live
+  update's new messages from others notify (`Notifier.messages`, DESIGN §3.3: title the contact, "to Studio", the
+  account's colour); not a history page, the first sync, messages from before the process, requests or General
+  (DESIGN §4.5), or the chat on screen. Text is marked private (Android's sensitive-notification setting decides the
+  lock screen). Opening or reading the chat clears it. O7 asks once (Android 13+); Accounts offers the battery
+  exemption. A signed-out account notifies when Ferry isn't on screen. Demo: `--ez incoming true` (Noor, 10 s in).
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
   SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told.
 - **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,
@@ -196,6 +207,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   an install can leave a corrupt APK: the package vanishes at the next boot, its data stays; reinstall (same uid),
   and `adb shell sync` after installs. After a crash the emulator shows a dialog asking to send Google the report
   and waits: boot with `-crash-report-mode never -no-metrics`.
+- **Android sends BOOT_COMPLETED when a force-stopped app next starts**, not only at boot: the receiver started the
+  service in the demo (with the emulator's stored session). The service stops itself when the app is the demo.
 - **A failed Instagram request is retried five times** (mautrix-meta's `MaxHTTPRetries`): Load story on an expired
   story cost 6 `reels_media` requests (2026-10-22). Count a failing call as six.
 - **The emulator's 2 GB can't hold it all** (system services, the app with Media3, the engine): it swaps and Android's

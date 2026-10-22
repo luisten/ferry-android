@@ -1,6 +1,8 @@
 package fi.ferry.messenger.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -272,6 +275,7 @@ fun AccountsSheet(dismiss: () -> Unit, addAccount: () -> Unit, open: (String) ->
             Button(addAccount, Modifier.fillMaxWidth()) { Text("Add Instagram account") }
             Text("Each chat stays tied to the account it belongs to.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (AppModel.accounts.isNotEmpty() && !AppModel.demo) BackgroundRow()
         }
     }
 }
@@ -388,5 +392,56 @@ fun RecoveryBar(name: String, login: () -> Unit) {
         .background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("$name is signed out. Log in again to send and receive messages.", style = MaterialTheme.typography.bodyMedium)
         Button(login, Modifier.fillMaxWidth()) { Text("Log in again") }
+    }
+}
+
+/**
+ * O7 (DESIGN): once, when there's an account and Android 13+ hasn't been asked yet, why notifications, then the system's
+ * own question. "Not now" isn't asked again; Android's settings can turn them on later.
+ */
+@Composable
+fun NotificationsPrompt() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("ferry", android.content.Context.MODE_PRIVATE) }
+    var asked by remember { mutableStateOf(prefs.getBoolean(ASKED, false)) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    if (asked || android.os.Build.VERSION.SDK_INT < 33 || fi.ferry.messenger.Notifier.allowed(context)) return
+    fun done() {
+        prefs.edit().putBoolean(ASKED, true).apply()
+        asked = true
+    }
+    AlertDialog(
+        onDismissRequest = ::done,
+        title = { Text("Get notified about new messages?") },
+        text = { Text("You'll see which account each message is for. Ferry stays connected in the background for this, with a quiet notification of its own.") },
+        confirmButton = { TextButton({ done(); permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) }) { Text("Turn On Notifications") } },
+        dismissButton = { TextButton(::done) { Text("Not now") } },
+    )
+}
+
+private const val ASKED = "notifications.asked"
+
+/**
+ * E8's weak spot: Android (and phone makers' savers) may stop Ferry in the background unless it's left out of battery
+ * optimisation. One tap asks Android; phone makers' own switches stay the user's (Samsung, Xiaomi).
+ */
+@Composable
+fun BackgroundRow() {
+    val context = LocalContext.current
+    val power = remember { context.getSystemService(android.os.PowerManager::class.java) }
+    var exempt by remember { mutableStateOf(power.isIgnoringBatteryOptimizations(context.packageName)) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        exempt = power.isIgnoringBatteryOptimizations(context.packageName)
+    }
+    if (exempt) return
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) {
+        Text("Android may stop Ferry in the background", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text("Then new messages wait until you open it. Let Ferry run in the background to keep them coming.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton({
+            @android.annotation.SuppressLint("BatteryLife") // not on Play: asking directly is allowed
+            val intent = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:${context.packageName}"))
+            ask.launch(intent)
+        }) { Text("Allow") }
     }
 }

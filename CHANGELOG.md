@@ -31,4 +31,6 @@ What changes for people who use the app, in plain words. The format is
 - A welcome screen, and after each login a name, colour and mark for the account, so its chats are easy to tell apart.
 - Accounts: see each account's state, rename it or change its colour and mark, log in again when Instagram signs you
   out (a banner and the chat say so), or remove an account from this phone.
+- Notifications for new messages, saying which of your accounts each one is for. Ferry stays connected in the
+  background for this, with a quiet notification of its own; message requests and General don't notify.
 - Your login stays on this phone, encrypted, and out of backups.

@@ -57,6 +57,11 @@ object AppModel {
     var connecting by mutableStateOf(false); private set
     /** Why the last new login failed, in Instagram's or the engine's words. */
     var loginError by mutableStateOf<String?>(null); private set
+    /** A notification's chat to open (MainActivity's intent). */
+    var openRoom by mutableStateOf<String?>(null)
+    /** On screen (MainActivity between onStart and onStop), and which chat: neither notifies. */
+    var foreground = false
+    var visibleRoom: String? = null
     /** A new account just connected: it's named next (O5, DESIGN §3.1). */
     var naming by mutableStateOf<String?>(null)
     /** Failed reconnects while no account is connected: two make the "Can't reach Instagram" banner. */
@@ -116,20 +121,33 @@ object AppModel {
     /** Our photos, GIFs, videos and voice notes on their way or failed, by transaction ID: Retry sends the same file. */
     private val outgoing = mutableMapOf<String, Attachment>()
     private var started = false
+    private lateinit var appContext: Context
+    /** Messages from before this process aren't news: they were there at launch, or came with history. */
+    private var startedAt = 0L
     /** Debug builds: a live account shown signed out until it logs in again (iOS's overridingStates), to check A3. */
     private var forcedSignedOut: String? = null
     /** Accounts logged in by mistake while fixing another (A3): stopped, and their updates dropped. */
     private val strangers = mutableSetOf<String>()
 
     /** Once per process: every stored account connects, an Instagram action each (index, mailbox, folders, socket). */
-    fun start(context: Context, demo: Boolean, requestRoom: String? = null, demoSignedOut: Boolean = false, signedOut: String? = null) {
+    fun start(
+        context: Context,
+        demo: Boolean,
+        requestRoom: String? = null,
+        demoSignedOut: Boolean = false,
+        signedOut: String? = null,
+        demoIncoming: Boolean = false,
+    ) {
         forcedSignedOut = signedOut
         if (started) return
         started = true
         this.demo = demo
+        appContext = context.applicationContext
+        startedAt = now()
+        Notifier.channels(appContext)
         MediaFiles.init(context)
         Outgoing.sweep(context)
-        if (demo) return loadDemo(demoSignedOut)
+        if (demo) return loadDemo(demoSignedOut, demoIncoming)
         requestRoom?.let { IGCore.setDebug(false, it.encodeToByteArray()) }
         prefs = context.getSharedPreferences("ferry", Context.MODE_PRIVATE)
         sessions = Sessions(context)
@@ -144,10 +162,11 @@ object AppModel {
         updateInitialSync()
         thread(name = "igcore-events", isDaemon = true) { events() }
         ids.forEach(::connect)
+        if (ids.isNotEmpty()) EngineService.start(appContext) // E8: connected while closed
     }
 
     /** `signedOut`: Kivo Studio needs a login (the banner, the thread's bar, A3). */
-    private fun loadDemo(signedOut: Boolean) {
+    private fun loadDemo(signedOut: Boolean, incoming: Boolean) {
         viewers += Demo.viewers
         for (id in Demo.viewers.keys) statuses[id] = Status(if (signedOut && id == Demo.KIVO) "BAD_CREDENTIALS" else "CONNECTED", null, now())
         roomsState.value = Demo.rooms(now()).associateByTo(mutableMapOf()) { it.id }
@@ -155,6 +174,14 @@ object AppModel {
         loaded += Demo.viewers.keys
         updateAccounts()
         updateInitialSync()
+        // `--ez incoming true`: Noor writes 10 s in, as a live update would bring it (A8's notification).
+        if (incoming) main.postDelayed({
+            val (id, event) = Demo.incoming(now())
+            val room = rooms[id] ?: return@postDelayed
+            room.apply(fi.ferry.messenger.model.JoinedRoom(timeline = fi.ferry.messenger.model.JoinedRoom.Timeline(listOf(event), limited = false)))
+            notify(room, Timeline.notifiable(listOf(event), ME, startedAt))
+            refresh()
+        }, 10_000)
     }
 
     /**
@@ -193,6 +220,7 @@ object AppModel {
         identities = identities - id
         write(IDENTITIES, identities)
         if (scopeKey == id) selectScope(Inbox.Scope.All)
+        if (!demo && statuses.isEmpty()) EngineService.stop(appContext)
         updateAccounts()
         updateInitialSync()
         refresh()
@@ -523,6 +551,12 @@ object AppModel {
         thread { IGCore.readChat(room.id.encodeToByteArray()) }
     }
 
+    private fun notify(room: Room, events: List<fi.ferry.messenger.model.Event>) {
+        if (foreground && visibleRoom == room.id) return
+        val identity = room.bridge?.receiver?.let { identities[it] }
+        Notifier.messages(appContext, room, events, identity?.name, identity?.color?.fill?.toInt())
+    }
+
     /** `go` once the engine's updates up to `seq` are applied. */
     private fun afterSeq(seq: Long, go: () -> Unit) {
         if (seq <= appliedSeq) go() else seqWaiters += seq to go
@@ -590,6 +624,7 @@ object AppModel {
         if (seq <= appliedSeq) loaded += id else waiting[id] = seq
         updateInitialSync()
         if (isNew) naming = id
+        if (isNew) EngineService.start(appContext)
     }
 
     /** On Welcome when there's no account yet, else as the screen's notice. */
@@ -615,6 +650,10 @@ object AppModel {
     private fun setStatus(id: String, state: String, message: String? = null) {
         val old = statuses[id]
         if (old?.state == state && old.message == message) return
+        val signedOut = setOf("BAD_CREDENTIALS", "LOGGED_OUT")
+        if (state in signedOut && old?.state !in signedOut && !foreground && !demo) {
+            Notifier.signedOut(appContext, id, identities[id]?.name ?: viewers[id]?.username ?: "An account")
+        }
         // A disconnect keeps its first time, so "Reconnecting…" can tell a blip from a long outage.
         statuses[id] = Status(state, message, if (old?.state == state) old.since else now())
         updateAccounts()
@@ -693,6 +732,12 @@ object AppModel {
         } else return
         IGAdapter.apply(update, room)
         if (outgoing.isNotEmpty()) update.update?.timeline?.events?.let(::fileSent)
+        // A live update's new messages notify; a page of history (`limited`) or the first sync doesn't.
+        val timeline = update.update?.timeline
+        if (initialSyncDone && timeline != null && timeline.limited != true) {
+            Timeline.notifiable(timeline.events.orEmpty(), ME, startedAt).takeIf { it.isNotEmpty() }?.let { notify(room, it) }
+        }
+        if (!room.isUnread) Notifier.clear(appContext, id)
         archived[id]?.let { if (Inbox.ARCHIVED_TAG !in room.tags) room.tags = room.tags + (Inbox.ARCHIVED_TAG to archiveTag(it)) }
         update.profiles?.let { profiles = profiles + it }
     }
