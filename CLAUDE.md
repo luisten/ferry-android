@@ -9,7 +9,8 @@ chat model and the design; this file holds what's Android's own.
 
 **Status:** A7 (2026-10-22): accounts (`ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
 another account?" after the first, the identity editor, each account's page with Remove Account, the signed-out
-prompt and bar, the inbox's banner; `AppModel.login(relogin)` refuses a different account); demo only. A6: media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
+prompt and bar, the inbox's banner; `AppModel.login(relogin)` refuses a different account). A6 and A7 checked live
+2026-10-22 (re-login, a photo and a voice note to kivostudio, the viewer, Load story on an expired story). A6: media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
 video", post and voice cards, the full-screen viewer; `MediaFiles` the download cache; `Outgoing` getting a pick ready;
 `VoiceRecorder`, `VoicePlayer`); checked on the demo only. A5 (2026-10-21): requests (`RequestBar`: Accept, Delete, "Reply instead"), Archive and Unarchive (this
 phone only), New Message (`ui/NewMessageScreen.kt`: From account, Instagram's people search, the DM); checked live,
@@ -195,6 +196,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   an install can leave a corrupt APK: the package vanishes at the next boot, its data stays; reinstall (same uid),
   and `adb shell sync` after installs. After a crash the emulator shows a dialog asking to send Google the report
   and waits: boot with `-crash-report-mode never -no-metrics`.
+- **A failed Instagram request is retried five times** (mautrix-meta's `MaxHTTPRetries`): Load story on an expired
+  story cost 6 `reels_media` requests (2026-10-22). Count a failing call as six.
 - **The emulator's 2 GB can't hold it all** (system services, the app with Media3, the engine): it swaps and Android's
   own system process stops responding ("Process system isn't responding", an AlarmManager lock in the trace, the
   time spent waiting to run ten times the running). Boot with `-memory 3072` (a boot option; the AVD stays at 2 GB).
