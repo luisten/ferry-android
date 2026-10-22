@@ -7,7 +7,9 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** A8 (2026-10-22), first part: notifications by E8's option 1 (the user's choice: a foreground service,
+**Status:** iOS 1.5 parity (2026-10-22): the iOS logo and launch screen; a chat that opens unread holds its "New
+messages" line; the jump-to-newest button; listening back to a voice note; the long press's reaction sheet with recent
+and any emoji; iOS's thread header, composer and inbox bottom bar. A8 (2026-10-22), first part: notifications by E8's option 1 (the user's choice: a foreground service,
 `EngineService`, keeps the engine connected while Ferry is closed; `Notifier`); checked on the demo. Still A8: days on a
 real phone for battery and phone makers' battery savers, and whether Instagram minds the connection. A7: accounts (`ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
 another account?" after the first, the identity editor, each account's page with Remove Account, the signed-out
@@ -140,6 +142,17 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   (DESIGN §4.5), or the chat on screen. Text is marked private (Android's sensitive-notification setting decides the
   lock screen). Opening or reading the chat clears it. O7 asks once (Android 13+); Accounts offers the battery
   exemption. A signed-out account notifies when Ferry isn't on screen. Demo: `--ez incoming true` (Noor, 10 s in).
+- **iOS parity is UI too** (the user, 2026-10-22): the same logo, layout and copy as the iOS app, in Material.
+  The icon is the iOS repo's `docs/design/ferry-icon-color.svg` with its paths copied verbatim into the adaptive
+  icon (`res/drawable/ic_launcher_*`, the 1024 artboard centred in the 108 dp layer), the themed icon and the
+  launch mark (dark: `ferry-icon-color-dark.svg`'s colours). Redo them when the SVGs change.
+- **Opening a thread** (iOS 1.5): unread, it holds the "New messages" line under the last message read unless what's
+  new reaches less than a quarter screen past it; hidden until placed (1 s at most). The list is reversed, so the
+  placement measures offsets after `scrollToItem` (a chat's start clamps it). A touch, the jump button or a send
+  lets go. Only a send from this phone follows the end (`Message.isLocalEcho`). Demo: `--ez busy true`.
+- **The long press opens a sheet** (iOS 1.5): the message named in one line, `RecentReactions` (tested; stored in
+  SharedPreferences, recorded when adding) and "+" (a field for the keyboard's emoji, `isEmoji`), then Reply, Copy,
+  Edit, Open in Instagram, Unsend/Delete, each run once the sheet is gone. Not yet: Share All for albums.
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
   SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told.
 - **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,

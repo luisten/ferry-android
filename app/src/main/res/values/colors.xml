@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- iOS's LaunchBackground: the icon's sea at its midpoint (light), black (dark). -->
+    <color name="launch">#12536D</color>
+</resources>

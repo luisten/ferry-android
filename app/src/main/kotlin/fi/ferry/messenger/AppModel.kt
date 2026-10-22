@@ -18,6 +18,7 @@ import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessagesPage
 import fi.ferry.messenger.model.PendingMessage
+import fi.ferry.messenger.model.RecentReactions
 import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.UserProfile
@@ -137,6 +138,7 @@ object AppModel {
         demoSignedOut: Boolean = false,
         signedOut: String? = null,
         demoIncoming: Boolean = false,
+        demoBusy: Boolean = false,
     ) {
         forcedSignedOut = signedOut
         if (started) return
@@ -147,7 +149,7 @@ object AppModel {
         Notifier.channels(appContext)
         MediaFiles.init(context)
         Outgoing.sweep(context)
-        if (demo) return loadDemo(demoSignedOut, demoIncoming)
+        if (demo) return loadDemo(demoSignedOut, demoIncoming, demoBusy)
         requestRoom?.let { IGCore.setDebug(false, it.encodeToByteArray()) }
         prefs = context.getSharedPreferences("ferry", Context.MODE_PRIVATE)
         sessions = Sessions(context)
@@ -166,10 +168,10 @@ object AppModel {
     }
 
     /** `signedOut`: Kivo Studio needs a login (the banner, the thread's bar, A3). */
-    private fun loadDemo(signedOut: Boolean, incoming: Boolean) {
+    private fun loadDemo(signedOut: Boolean, incoming: Boolean, busy: Boolean) {
         viewers += Demo.viewers
         for (id in Demo.viewers.keys) statuses[id] = Status(if (signedOut && id == Demo.KIVO) "BAD_CREDENTIALS" else "CONNECTED", null, now())
-        roomsState.value = Demo.rooms(now()).associateByTo(mutableMapOf()) { it.id }
+        roomsState.value = Demo.rooms(now(), busy).associateByTo(mutableMapOf()) { it.id }
         profiles = Demo.profiles
         loaded += Demo.viewers.keys
         updateAccounts()
@@ -357,8 +359,17 @@ object AppModel {
         val target = message.eventID ?: return
         // A removal names the key Instagram has ("❤" for the palette's "❤️"): with ours, Instagram kept the heart (A5 check).
         val mine = message.reactions.firstOrNull { Message.Reaction.same(it.key, key) && ME in it.senders }
+        if (mine == null) useReaction(key)
         val emoji = (mine?.key ?: key).encodeToByteArray()
         perform(room) { IGCore.react(room.id.encodeToByteArray(), target.encodeToByteArray(), emoji, mine != null) }
+    }
+
+    /** The long press's row: the last six reactions used on this phone (`RecentReactions`). */
+    fun recentReactions(): List<String> =
+        RecentReactions.row(if (demo) null else read<List<String>>(RECENT_REACTIONS))
+
+    private fun useReaction(key: String) {
+        if (!demo) write(RECENT_REACTIONS, RecentReactions.adding(key, recentReactions()))
     }
 
     /** Our own text, within 15 minutes and 5 edits (the engine refuses otherwise; `Timeline.canEdit` hides the item). */
@@ -758,5 +769,6 @@ object AppModel {
     private const val VIEWERS = "viewers"
     private const val SCOPE = "inbox.scope"
     private const val ARCHIVED = "archived"
+    private const val RECENT_REACTIONS = "reactions.recent"
     private const val LOCAL = "local:"
 }

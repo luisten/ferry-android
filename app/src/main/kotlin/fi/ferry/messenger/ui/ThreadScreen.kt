@@ -9,9 +9,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,10 +61,14 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
@@ -69,11 +79,13 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -100,6 +112,9 @@ import fi.ferry.messenger.model.parseURL
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /** DESIGN §6.1 groups: the sender's 28 dp avatar beside the last bubble of a run, and the indent it leaves. */
 private val GROUP_AVATAR = 28.dp
@@ -163,6 +178,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
         retry = { AppModel.retry(it, room) },
         discard = { AppModel.discard(it, room) },
         readOnly = !Inbox.allowsReceipts(room),
+        firstName = { people.firstName(it) },
     )
     fun send() {
         val text = draft.text.trim()
@@ -187,10 +203,44 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     LaunchedEffect(roomID) { AppModel.openThread(room) } // the whole thread: reactions, edits, reply targets
     // On open and on each new message while it shows; the engine decides whether a "Seen" goes (unread, not a request).
     LaunchedEffect(room.events.lastOrNull()?.eventID) { AppModel.markRead(room) }
-    // A new message while at the end, or our own: follow it. ponytail: no hold on the "New messages" line yet; opens at the end.
-    LaunchedEffect(messages.lastOrNull()?.id, typing) {
-        if (list.firstVisibleItemIndex <= 1 || messages.lastOrNull()?.isOwn == true) list.animateScrollToItem(0)
+    // iOS 1.5: a chat that opens unread holds its "New messages" line near the top, the last message read above it,
+    // unless what's new reaches less than a quarter screen past it: then it opens at the end. Hidden until placed (1 s
+    // at most). A touch, the jump button or a send lets go.
+    val lineRow = remember(roomID) { rows.indexOfFirst { it.startsUnread } }
+    var holdsLine by remember(roomID) { mutableStateOf(unreadAfter != null && lineRow >= 0) }
+    var revealed by remember(roomID) { mutableStateOf(!holdsLine) }
+    LaunchedEffect(roomID) {
+        if (!holdsLine) return@LaunchedEffect
+        launch { delay(1_000); revealed = true }
+        snapshotFlow { list.layoutInfo.viewportSize.height }.first { it > 0 }
+        val line = rows.size - 1 - lineRow + if (typing) 1 else 0 // reversed: index 0 is the newest, at the bottom
+        list.scrollToItem(line) // the line's row near the bottom (higher up when the chat's start is close)
+        val info = list.layoutInfo
+        val viewport = info.viewportEndOffset - info.viewportStartOffset
+        val lineItem = info.visibleItemsInfo.firstOrNull { it.index == line }
+        val context = if (lineRow > 0) info.visibleItemsInfo.firstOrNull { it.index == line + 1 }?.size ?: 0 else 0
+        // Reversed, offsets count up from the bottom: the line's top edge goes to the top, less the last message read.
+        if (lineItem != null) list.scrollBy(-(info.viewportEndOffset - context - (lineItem.offset + lineItem.size)).toFloat())
+        val below = -list.scrollBy(-1e7f) // what's under the screen there (it ends at the end)
+        if (below - context > viewport / 4) list.scrollBy(below) else holdsLine = false
+        revealed = true
     }
+    LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) holdsLine = false } }
+    // A new message while at the end, or our own sent from here: follow it. Ours from Instagram's app arrives as an
+    // event like theirs and leaves the scroll alone (iOS 1.5).
+    LaunchedEffect(messages.lastOrNull()?.id, typing) {
+        val sentHere = messages.lastOrNull()?.isLocalEcho == true
+        if (sentHere) holdsLine = false
+        if (!holdsLine && (list.firstVisibleItemIndex <= 1 || sentHere)) list.animateScrollToItem(0)
+    }
+    // The jump-to-newest button (iOS 1.5): away from the end, once scrolling rests (at once while the line's held), with
+    // what others sent since it appeared.
+    val density = LocalDensity.current
+    val far by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > with(density) { 60.dp.toPx() } } }
+    var jumpSince by remember(roomID) { mutableStateOf<Long?>(null) }
+    val showsJump = revealed && far && (jumpSince != null || holdsLine || !list.isScrollInProgress)
+    LaunchedEffect(showsJump) { jumpSince = if (showsJump) jumpSince ?: room.lastActivity else null }
+    val scope = rememberCoroutineScope()
     // The composer's typing state as it changes (the engine throttles it, never in a request); off when leaving.
     // Derived, so a keystroke recomposes only the composer, not the whole thread.
     val composing by remember(roomID) { derivedStateOf { draft.text.isNotEmpty() && editing == null } }
@@ -263,8 +313,9 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                 }
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
-                CompositionLocalProvider(LocalMedia provides media) {
-                    LazyColumn(Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
+                CompositionLocalProvider(LocalMedia provides media) { Box(Modifier.fillMaxSize()) {
+                    LazyColumn(Modifier.fillMaxSize().alpha(if (revealed) 1f else 0f), state = list, reverseLayout = true,
+                        contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
                         if (typing) item("typing") { TypingBubble(Modifier.padding(top = 10.dp, start = if (isGroup) GROUP_INDENT else 0.dp)) }
                         items(rows.asReversed(), key = { it.id }) { row ->
                             MessageRow(row, identity, people, isGroup, showsStatus = row.id == lastOwn,
@@ -272,7 +323,15 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                         }
                         item("top") { Top(room, identity, messages.isEmpty()) }
                     }
-                }
+                    androidx.compose.animation.AnimatedVisibility(showsJump, Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 8.dp),
+                        enter = fadeIn() + scaleIn(initialScale = 0.8f), exit = fadeOut() + scaleOut(targetScale = 0.8f)) {
+                        JumpButton(Timeline.newCount(messages, jumpSince ?: Long.MAX_VALUE)) {
+                            holdsLine = false
+                            jumpSince = null
+                            scope.launch { list.animateScrollToItem(0) }
+                        }
+                    }
+                } }
             }
         }
     }
@@ -326,9 +385,16 @@ private class People(val room: Room, val profiles: Map<String, UserProfile>) {
 /** One glass-free capsule's worth: back, the contact, and under the name the account this chat belongs to. */
 @Composable
 private fun ThreadHeader(room: Room, identity: AccountIdentity?, back: () -> Unit, actions: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(back) { Icon(Icons.back, "Back") }
-        Row(Modifier.weight(1f).semantics(mergeDescendants = true) { heading() }, verticalAlignment = Alignment.CenterVertically) {
+    // As iOS: back and ⋯ in round buttons, the contact and the account's tag in a capsule between them.
+    Box(Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp)) {
+        Box(Modifier.align(Alignment.CenterStart).size(44.dp).shadow(4.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface)
+            .clickable(onClickLabel = "Back", onClick = back), contentAlignment = Alignment.Center) { Icon(Icons.back, "Back") }
+        Row(
+            Modifier.align(Alignment.Center).padding(horizontal = 56.dp).heightIn(min = 48.dp).shadow(4.dp, CircleShape).clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surface).padding(start = 6.dp, end = 14.dp, top = 4.dp, bottom = 4.dp)
+                .semantics(mergeDescendants = true) { heading() },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             ChatAvatar(room, 32.dp)
             Spacer(Modifier.width(8.dp))
             Column {
@@ -336,7 +402,8 @@ private fun ThreadHeader(room: Room, identity: AccountIdentity?, back: () -> Uni
                 if (identity != null) AccountTag(identity, compact = true)
             }
         }
-        actions()
+        Box(Modifier.align(Alignment.CenterEnd).size(44.dp).shadow(4.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface),
+            contentAlignment = Alignment.Center) { actions() }
     }
 }
 
@@ -439,6 +506,28 @@ private fun MessageRow(
     }
 }
 
+/**
+ * iOS 1.5's jump to the newest message: a chevron, and how many others sent since it appeared. Never the account's
+ * colour or a red badge.
+ */
+@Composable
+private fun JumpButton(count: Int, jump: () -> Unit) {
+    Row(
+        Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).shadow(4.dp, CircleShape).clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surface).clickable(onClick = jump)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Jump to newest message"
+                if (count > 0) stateDescription = if (count == 1) "1 new message" else "$count new messages"
+            }
+            .padding(horizontal = if (count > 0) 14.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.chevronDown, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
+        if (count > 0) Text(if (count > 99) "99+" else "$count", Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
 /** Where what you hadn't read starts, when the chat opened unread. */
 @Composable
 private fun UnreadLine() {
@@ -450,9 +539,11 @@ private fun UnreadLine() {
     }
 }
 
-/** A story reply or reaction is the story with what was sent under it, as Instagram shows them. */
+/**
+ * A message's bubble; a story reply or reaction is the story with what was sent under it, as Instagram shows them.
+ * `pills` sit on the bubble's last part: the text under a story or a share, not the card's far edge.
+ */
 @Composable
-/** `pills` sit on the bubble's last part: the text under a story or a share, not the card's far edge. */
 private fun Bubble(message: Message, position: GroupPosition, identity: AccountIdentity?, people: People, pills: @Composable BoxScope.() -> Unit) {
     val own = message.isOwn
     val shape = bubbleShape(position, own)

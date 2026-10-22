@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
@@ -94,11 +96,24 @@ fun InboxScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        floatingActionButton = {
-            // DESIGN I1's compose button: in an account's scope, in its colour.
-            if (query == null && AppModel.accounts.isNotEmpty()) {
-                FloatingActionButton(newMessage, containerColor = identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground,
-                    contentColor = MaterialTheme.colorScheme.background) { Icon(Icons.edit, "New message") }
+        bottomBar = {
+            // DESIGN I1, as iOS: search on the left of the bottom bar, compose right of it.
+            if (query == null) Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    Modifier.weight(1f).height(52.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface)
+                        .clickable(onClickLabel = "Search") { query = "" }.padding(horizontal = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(Icons.search, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (identity != null) "Search ${identity.name}" else "Search", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge)
+                }
+                if (AppModel.accounts.isNotEmpty()) Box(
+                    Modifier.size(52.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface)
+                        .clickable(onClickLabel = "New message", onClick = newMessage),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.compose, "New message", Modifier.size(24.dp), tint = identity?.color?.ink ?: MaterialTheme.colorScheme.onBackground) }
             }
         },
     ) { padding ->
@@ -113,7 +128,6 @@ fun InboxScreen(
                         title = identity?.name ?: "Chats",
                         subtitle = login?.let { Inbox.scopeSubtitle(it.profile?.username, it.isProfessional, AppModel.accounts.size) },
                         openAccounts = openAccounts,
-                        search = { query = "" },
                         menu = Inbox.foldersMenu(rooms, scope, AppModel.accounts, logins, AppModel.requestsSeen),
                         openFolder = { openFolder(it, scope) },
                     )
@@ -209,7 +223,6 @@ private fun TopBar(
     title: String,
     subtitle: String?,
     openAccounts: () -> Unit,
-    search: () -> Unit,
     menu: Inbox.FoldersMenu,
     openFolder: (Folder) -> Unit,
 ) {
@@ -221,10 +234,7 @@ private fun TopBar(
                 Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
         }
-        Row(Modifier.align(Alignment.CenterEnd)) {
-            IconButton(search) { Icon(Icons.search, "Search") }
-            FoldersMenu(menu, openFolder)
-        }
+        Row(Modifier.align(Alignment.CenterEnd)) { FoldersMenu(menu, openFolder) }
     }
 }
 

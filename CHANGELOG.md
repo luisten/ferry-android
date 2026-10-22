@@ -33,4 +33,10 @@ What changes for people who use the app, in plain words. The format is
   out (a banner and the chat say so), or remove an account from this phone.
 - Notifications for new messages, saying which of your accounts each one is for. Ferry stays connected in the
   background for this, with a quiet notification of its own; message requests and General don't notify.
+- The app has Ferry's icon (the ferry with two speech bubbles) and its launch screen.
+- A chat with many new messages opens where they start, under the last one you read. A button takes you to the newest
+  message, with how many arrived since.
+- Listen to a voice message before sending it: tap the mic, then Stop, play it back, and Send or delete it.
+- Touch and hold a message for big buttons with the reactions you used last, and "+" for any emoji.
+- Search sits at the bottom of the inbox, next to the new-message button.
 - Your login stays on this phone, encrypted, and out of backups.

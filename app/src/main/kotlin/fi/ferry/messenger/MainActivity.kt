@@ -42,7 +42,8 @@ class MainActivity : ComponentActivity() {
             demoSignedOut = demo && intent.getBooleanExtra("signed_out", false),
             // A live account shown signed out (nothing reaches Instagram) until it logs in again: A3's live check.
             signedOut = intent.getStringExtra("signed_out_account")?.takeIf { debuggable && !demo },
-            demoIncoming = demo && intent.getBooleanExtra("incoming", false))
+            demoIncoming = demo && intent.getBooleanExtra("incoming", false),
+            demoBusy = demo && intent.getBooleanExtra("busy", false))
         AppModel.openRoom = intent.getStringExtra(OPEN_ROOM)
         if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
         setContent { FerryTheme { App() } }

@@ -26,6 +26,10 @@ object VoiceRecorder {
     private var file: File? = null
 
     var recording by mutableStateOf(false); private set
+    /** Recording on after a tap (or a hold let go too soon): Stop, then listen back, is offered. A hold has no Stop. */
+    var handsFree by mutableStateOf(false)
+    /** Stopped and being listened to (iOS 1.5): Send or the bin; nothing sends by itself here. */
+    var review by mutableStateOf<Attachment?>(null); private set
     /** `SystemClock.elapsedRealtime()` when it started. */
     var startedAt by mutableLongStateOf(0L); private set
 
@@ -60,8 +64,27 @@ object VoiceRecorder {
         }.isSuccess
     }
 
+    /** Hands-free only: the recording ends and waits to be listened to. False when it couldn't be kept. */
+    fun stop(): Boolean {
+        if (!handsFree) return false
+        val ms = elapsed
+        val out = file
+        if (!stopRecorder() || out == null) return false
+        handsFree = true
+        review = Attachment(out, "audio/mp4", Attachment.Kind.VOICE, 0, 0, ms.coerceAtMost(MAX_MS), null)
+        return true
+    }
+
     /** The note, or null when it's too short (it's thrown away) or the recorder failed. */
     fun finish(): Attachment? {
+        review?.let { note ->
+            review = null
+            handsFree = false
+            file = null
+            if (isLongEnough(note.duration ?: 0)) return note
+            note.file.delete()
+            return null
+        }
         val ms = elapsed
         val out = file
         if (!stopRecorder() || out == null) return null
@@ -76,12 +99,15 @@ object VoiceRecorder {
         stopRecorder()
         file?.delete()
         file = null
+        review = null
+        handsFree = false
     }
 
     private fun stopRecorder(): Boolean {
         val r = recorder ?: return false
         recorder = null
         recording = false
+        handsFree = false
         // stop() throws when nothing was written (a very short press): the file is useless then.
         return runCatching { r.stop() }.isSuccess.also { r.release() }
     }

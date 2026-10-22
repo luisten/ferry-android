@@ -76,9 +76,14 @@ object Demo {
         else BridgeAPI.Contact(user.removePrefix("@ig_"), p.name, p.avatarURL, p.handle?.let { listOf("instagram:$it") })
     }
 
-    fun rooms(now: Long): List<Room> =
-        chats.mapIndexed { i, c -> dm("!debug-demo-${i + 1}", c.name, c.fbid, c.account, request = false, c.unread,
-            c.lines.map { Triple(it.fromMe, now - it.minutesAgo * 60_000, it.text) }) } +
+    /** `busy` (`--ez busy true`): Harbor Coffee read up to our reply, then 30 new messages, more than a screen. */
+    fun rooms(now: Long, busy: Boolean = false): List<Room> =
+        chats.mapIndexed { i, c ->
+            val more = if (busy && i == 1) (1..28).map { Line(false, 39L - it, "Detail $it of the shoot plan") } else emptyList()
+            dm("!debug-demo-${i + 1}", c.name, c.fbid, c.account, request = false, c.unread + more.size,
+                (c.lines + more).map { Triple(it.fromMe, now - it.minutesAgo * 60_000, it.text) },
+                readUpTo = if (busy && i == 1) now - 90 * 60_000 else null)
+        } +
         requests.mapIndexed { i, r -> dm("!debug-request-${i + 1}", r.name, r.fbid, r.account, request = true, r.unread,
             r.texts.mapIndexed { j, t -> Triple(false, now - r.minutesAgo * 60_000 + j * 40_000, t) }) } +
         group(now) + media(now)
@@ -103,7 +108,10 @@ object Demo {
 
     private fun member(name: String) = buildJsonObject { put("membership", "join"); put("displayname", name) }
 
-    private fun dm(id: String, name: String, fbid: String, account: String, request: Boolean, unread: Int, lines: List<Triple<Boolean, Long, String>>): Room {
+    private fun dm(
+        id: String, name: String, fbid: String, account: String, request: Boolean, unread: Int, lines: List<Triple<Boolean, Long, String>>,
+        readUpTo: Long? = null,
+    ): Room {
         val ghost = IGAdapter.user(fbid)
         val start = (lines.minOfOrNull { it.second } ?: 0) - 1000
         val events = listOf(
@@ -111,7 +119,13 @@ object Demo {
             state("m.room.name", "", buildJsonObject { put("name", name) }, start),
             state("m.room.member", ghost, member(name), start, ghost),
         ) + lines.mapIndexed { j, (fromMe, ts, body) -> text("\$$id-$j", if (fromMe) IGAdapter.ME else ghost, ts, body) }
-        return room(id, events, unread)
+        val receipt = readUpTo?.let { ts ->
+            val upTo = lines.indexOfLast { it.second <= ts }
+            Event("m.receipt", buildJsonObject {
+                putJsonObject("\$$id-$upTo") { putJsonObject("m.read") { putJsonObject(IGAdapter.ME) { put("ts", ts) } } }
+            })
+        }
+        return room(id, events, unread, receipt)
     }
 
     /**

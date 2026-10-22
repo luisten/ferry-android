@@ -8,11 +8,13 @@ import android.content.pm.PackageManager
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,15 +37,15 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -52,12 +54,16 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
@@ -67,7 +73,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -75,14 +83,19 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import fi.ferry.messenger.AppModel
 import fi.ferry.messenger.Attachment
+import fi.ferry.messenger.VoicePlayer
 import fi.ferry.messenger.VoiceRecorder
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessageKind
+import fi.ferry.messenger.model.RecentReactions
 import fi.ferry.messenger.model.Timeline
+import fi.ferry.messenger.model.get
+import fi.ferry.messenger.model.string
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** What a message's menu can do; `readOnly` in a request (the engine refuses reactions, edits and unsends there). */
 class MessageActions(
@@ -93,10 +106,9 @@ class MessageActions(
     val retry: (Message) -> Unit,
     val discard: (Message) -> Unit,
     val readOnly: Boolean,
+    /** "You", or a sender's first name: the sheet's line naming the message. */
+    val firstName: (String) -> String = { it },
 )
-
-/** Instagram's quick reactions (DESIGN §6.2). */
-private val palette = listOf("❤️", "😂", "😮", "😢", "🔥", "👍")
 
 /**
  * A long press opens the message's menu: the reaction row, Reply, Copy, Edit, Unsend (or Delete for a failed send).
@@ -118,42 +130,11 @@ fun MessageMenu(message: Message, actions: MessageActions, content: @Composable 
             onClick = { if (failed) actions.retry(message) else tap.action?.invoke() },
             onDoubleClick = if (canSend && message.kind.media == null && (mine == null || !Message.Reaction.same(mine, "❤️"))) ({ actions.react("❤️", message) }) else null,
             onLongClick = { if (message.kind != MessageKind.Unsent) open = true },
-        ).semantics { if (message.kind != MessageKind.Unsent) onLongClick("Message options") { open = true; true } },
+        ).semantics { if (message.kind != MessageKind.Unsent) onLongClick("React or reply") { open = true; true } },
     ) {
         CompositionLocalProvider(LocalTap provides tap) { content() }
-        DropdownMenu(open, { open = false }) {
-            if (canSend) {
-                Row(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    for (key in palette) {
-                        Text(
-                            key,
-                            Modifier.clip(CircleShape)
-                                .background(if (mine != null && Message.Reaction.same(key, mine)) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
-                                .combinedClickable(onClick = { open = false; actions.react(key, message) })
-                                .padding(6.dp)
-                                .semantics { contentDescription = if (mine != null && Message.Reaction.same(key, mine)) "Remove $key" else "React $key" },
-                            fontSize = 24.sp,
-                        )
-                    }
-                }
-                HorizontalDivider()
-                DropdownMenuItem({ Text("Reply") }, { open = false; actions.reply(message) }, leadingIcon = { Icon(Icons.reply, null) })
-            }
-            copyable?.let { text ->
-                DropdownMenuItem({ Text("Copy") }, { open = false; copy(context, text) }, leadingIcon = { Icon(Icons.copy, null) })
-            }
-            if (!actions.readOnly && Timeline.canEdit(message)) {
-                DropdownMenuItem({ Text("Edit") }, { open = false; actions.edit(message) }, leadingIcon = { Icon(Icons.edit, null) })
-            }
-            if (!actions.readOnly && message.isOwn && message.eventID != null) {
-                DropdownMenuItem({ Text("Unsend", color = MaterialTheme.colorScheme.error) }, { open = false; confirmUnsend = true },
-                    leadingIcon = { Icon(Icons.unsend, null, tint = MaterialTheme.colorScheme.error) })
-            } else if (message.isOwn && failed) {
-                DropdownMenuItem({ Text("Delete", color = MaterialTheme.colorScheme.error) }, { open = false; actions.discard(message) },
-                    leadingIcon = { Icon(Icons.delete, null, tint = MaterialTheme.colorScheme.error) })
-            }
-        }
     }
+    if (open) MessageSheet(message, actions, canSend, mine, copyable, failed, close = { open = false }, unsend = { confirmUnsend = true })
     if (confirmUnsend) {
         AlertDialog(
             onDismissRequest = { confirmUnsend = false },
@@ -165,6 +146,118 @@ fun MessageMenu(message: Message, actions: MessageActions, content: @Composable 
             dismissButton = { TextButton({ confirmUnsend = false }) { Text("Cancel") } },
         )
     }
+}
+
+/**
+ * iOS 1.5's long-press sheet: one line naming the message, big buttons with the last reactions used and "+" for any
+ * emoji, then Reply, Copy, Edit, Open in Instagram, Unsend or Delete. An action runs once the sheet is gone.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageSheet(
+    message: Message, actions: MessageActions, canSend: Boolean, mine: String?, copyable: String?, failed: Boolean,
+    close: () -> Unit, unsend: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    // Read once: the row never reshuffles while it's open.
+    val row = remember { RecentReactions.shown(AppModel.recentReactions(), mine) }
+    var picking by remember { mutableStateOf(false) }
+    fun then(action: () -> Unit) {
+        scope.launch { state.hide() }.invokeOnCompletion { close(); action() }
+    }
+    ModalBottomSheet(close, sheetState = state, containerColor = MaterialTheme.colorScheme.background) {
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Text("${actions.firstName(message.sender)}: ${message.kind.media?.label ?: message.body}", maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (canSend) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    for (key in row) {
+                        val ours = mine != null && Message.Reaction.same(key, mine)
+                        Box(
+                            Modifier.size(48.dp).clip(CircleShape)
+                                .background(if (ours) MaterialTheme.colorScheme.onBackground.copy(alpha = 0.12f) else Color.Transparent)
+                                .clickable { then { actions.react(key, message) } }
+                                .semantics { contentDescription = if (ours) "Remove $key" else "React $key"; selected = ours },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(key, fontSize = 30.sp) }
+                    }
+                    Box(
+                        Modifier.size(40.dp).clip(CircleShape).background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.06f))
+                            .clickable { picking = true }.semantics { contentDescription = "All emoji" },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.add, null, tint = MaterialTheme.colorScheme.onBackground) }
+                }
+                if (picking) EmojiField { key -> then { actions.react(key, message) } }
+            }
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f))) {
+                if (canSend) SheetRow(Icons.reply, "Reply") { then { actions.reply(message) } }
+                copyable?.let { text -> SheetRow(Icons.copy, "Copy") { copy(context, text); then {} } }
+                if (!actions.readOnly && Timeline.canEdit(message)) SheetRow(Icons.edit, "Edit") { then { actions.edit(message) } }
+                message.content["external_url"].string?.takeIf { it.startsWith("https://") }?.let { url ->
+                    SheetRow(Icons.openOutside, "Open in Instagram") {
+                        then { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))) }
+                    }
+                }
+                if (!actions.readOnly && message.isOwn && message.eventID != null) {
+                    SheetRow(Icons.unsend, "Unsend", destructive = true) { then(unsend) }
+                } else if (message.isOwn && failed) {
+                    SheetRow(Icons.delete, "Delete", destructive = true) { then { actions.discard(message) } }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SheetRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, destructive: Boolean = false, action: () -> Unit) {
+    val color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground
+    Row(Modifier.fillMaxWidth().clickable(onClick = action).heightIn(min = 50.dp).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Icon(icon, null, Modifier.size(24.dp), tint = color)
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
+    }
+}
+
+/**
+ * "+": any emoji. Android can't ask the keyboard for its emoji page, so the field opens it with a hint; the first emoji
+ * typed is the reaction, anything else is ignored. ponytail: no emoji grid of our own (androidx emoji2-emojipicker
+ * would be a new library).
+ */
+@Composable
+private fun EmojiField(pick: (String) -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) { focus.requestFocus(); keyboard?.show() }
+    androidx.compose.material3.OutlinedTextField(text, { typed ->
+        val emoji = graphemes(typed).firstOrNull(::isEmoji)
+        if (emoji != null) pick(emoji) else text = ""
+    }, Modifier.fillMaxWidth().focusRequester(focus), singleLine = true,
+        placeholder = { Text("Choose an emoji from your keyboard") })
+}
+
+/** One emoji: its first code point is an emoji shown as one, or it's a sequence (❤️, 👍🏽, 👨‍👩‍👧). Not digits or letters. */
+fun isEmoji(grapheme: String): Boolean {
+    val first = grapheme.codePointAt(0)
+    if (!android.icu.lang.UCharacter.hasBinaryProperty(first, android.icu.lang.UProperty.EMOJI)) return false
+    return android.icu.lang.UCharacter.hasBinaryProperty(first, android.icu.lang.UProperty.EMOJI_PRESENTATION) ||
+        grapheme.codePointCount(0, grapheme.length) > 1
+}
+
+private fun graphemes(text: String): List<String> {
+    val it = java.text.BreakIterator.getCharacterInstance().apply { setText(text) }
+    val out = mutableListOf<String>()
+    var start = it.first()
+    var end = it.next()
+    while (end != java.text.BreakIterator.DONE) {
+        out += text.substring(start, end)
+        start = end
+        end = it.next()
+    }
+    return out
 }
 
 private fun copy(context: Context, text: String) {
@@ -213,20 +306,26 @@ fun Composer(
             null -> {}
         }
         attachment?.let { AttachmentBar(it, removeAttachment) }
-        val recording = VoiceRecorder.recording && sendVoice != null
+        val recording = (VoiceRecorder.recording || VoiceRecorder.review != null) && sendVoice != null
+        // As iOS: "+" in its own circle left of the field.
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (!recording) attach?.let {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClickLabel = "Photo or video", onClick = it),
+                contentAlignment = Alignment.Center) { Icon(Icons.add, "Photo or video", tint = MaterialTheme.colorScheme.onBackground) }
+        }
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 44.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
+            Modifier.weight(1f).heightIn(min = 44.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
                 .padding(start = 8.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            if (!recording) attach?.let {
-                IconButton(it, Modifier.size(32.dp).padding(bottom = 0.dp)) { Icon(Icons.add, "Photo or video", tint = MaterialTheme.colorScheme.onBackground) }
-            }
             Box(Modifier.padding(bottom = 2.dp).semantics(mergeDescendants = true) { contentDescription = "Sending as $account" }) {
                 AccountAvatar(identity, login?.profile?.avatar, account, 28.dp)
+                MarkOnAvatar(identity, 28.dp, 12.dp)
             }
             // While recording the field gives way to the strip; the mic stays where it is (it holds the press).
-            if (recording) Box(Modifier.weight(1f)) { RecordingStrip(sendVoice!!) } else Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
+            if (recording) Box(Modifier.weight(1f)) {
+                VoiceRecorder.review?.let { ReviewPlayer(it) } ?: RecordingStrip(sendVoice!!)
+            } else Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
                 BasicTextField(
                     draft, change, Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = "Message, sending as $account" },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onBackground),
@@ -254,6 +353,7 @@ fun Composer(
                 }
             }
         }
+        }
     }
 }
 
@@ -264,15 +364,17 @@ fun Composer(
 @Composable
 private fun MicButton(send: (Attachment) -> Unit) {
     val context = LocalContext.current
+    val sending = VoiceRecorder.recording || VoiceRecorder.review != null
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) AppModel.actionError = "Voice messages need the microphone. Allow it in Settings, under Ferry Messenger's permissions."
     }
     Box(
         Modifier.size(40.dp).clip(CircleShape)
-            .semantics { contentDescription = if (VoiceRecorder.recording) "Send voice message" else "Record a voice message" }
+            .semantics { contentDescription = if (sending) "Send voice message" else "Record a voice message" }
             .pointerInput(Unit) {
                 detectTapGestures(onPress = {
-                    if (VoiceRecorder.recording) { // hands-free: the mic is Send now
+                    if (VoiceRecorder.recording || VoiceRecorder.review != null) { // hands-free or listening back: Send
+                        VoicePlayer.stop()
                         finish(send)
                         return@detectTapGestures
                     }
@@ -284,16 +386,19 @@ private fun MicButton(send: (Attachment) -> Unit) {
                         AppModel.actionError = "The microphone is busy. Try again."
                         return@detectTapGestures
                     }
+                    VoicePlayer.stop()
                     val pressed = SystemClock.elapsedRealtime()
                     tryAwaitRelease()
                     if (VoiceRecorder.sendsOnRelease(SystemClock.elapsedRealtime() - pressed, VoiceRecorder.elapsed)) {
                         VoiceRecorder.finish()?.let(send)
-                    } // else: hands-free, the strip takes over
+                    } else if (VoiceRecorder.recording) {
+                        VoiceRecorder.handsFree = true // a tap, or let go too soon: Stop and listen back are offered
+                    }
                 })
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (VoiceRecorder.recording) {
+        if (sending) {
             Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.onBackground, CircleShape), contentAlignment = Alignment.Center) {
                 Icon(Icons.send, "Send voice message", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.background)
             }
@@ -335,6 +440,50 @@ private fun RecordingStrip(send: (Attachment) -> Unit) {
                 Box(Modifier.width(3.dp).height((4 + 20 * level).dp).background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape))
             }
         }
+        // iOS 1.5: hands-free, Stop ends it to listen back before sending. A hold has none.
+        if (VoiceRecorder.handsFree) IconButton({
+            if (!VoiceRecorder.stop()) AppModel.actionError = "Couldn't keep the recording."
+        }) { Icon(Icons.stop, "Stop and listen back", tint = MaterialTheme.colorScheme.onBackground) }
+    }
+}
+
+/** Listening back (iOS 1.5's ReviewPlayer): the bin, play or pause, the bars (drag to seek), the time. */
+@Composable
+private fun ReviewPlayer(note: Attachment) {
+    val context = LocalContext.current
+    val id = "composer.review"
+    val duration = note.duration ?: 0L
+    val loaded = VoicePlayer.current == id
+    val playing = loaded && VoicePlayer.playing
+    var position by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(loaded, playing) {
+        position = if (loaded) VoicePlayer.position else 0
+        while (playing) {
+            position = VoicePlayer.position
+            delay(100)
+        }
+    }
+    val heights = remember(note.file.name) { voiceBars(note.file.name, 24) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        IconButton({ VoicePlayer.stop(); VoiceRecorder.cancel() }) { Icon(Icons.delete, "Delete recording", tint = MaterialTheme.colorScheme.error) }
+        IconButton({ VoicePlayer.toggle(context, id, note.file) }, Modifier.semantics { stateDescription = clock(duration) }) {
+            Icon(if (playing) Icons.pause else Icons.play, if (playing) "Pause recording" else "Play recording", tint = MaterialTheme.colorScheme.onBackground)
+        }
+        val ink = MaterialTheme.colorScheme.onBackground
+        Canvas(Modifier.weight(1f).height(24.dp).pointerInput(duration, loaded) {
+            if (!loaded || duration <= 0) return@pointerInput
+            detectHorizontalDragGestures { change, _ -> VoicePlayer.seek(id, (change.position.x / size.width * duration).toLong().coerceIn(0, duration)) }
+        }) {
+            val bar = 3.dp.toPx()
+            val gap = (size.width - bar * heights.size) / (heights.size - 1)
+            val done = if (duration > 0) position.toFloat() / duration else 0f
+            heights.forEachIndexed { i, fraction ->
+                val h = size.height * fraction
+                drawRoundRect(if (i.toFloat() / heights.size < done) ink else ink.copy(alpha = 0.35f),
+                    Offset(i * (bar + gap), (size.height - h) / 2), Size(bar, h), CornerRadius(bar / 2))
+            }
+        }
+        Text(clock(if (playing) position else duration), style = MaterialTheme.typography.labelLarge)
     }
 }
 

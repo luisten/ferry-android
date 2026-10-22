@@ -322,6 +322,28 @@ data class Message(
 }
 
 /** A send we've started whose echo hasn't come back yet (local echo). */
+/**
+ * The long press's reactions (iOS 1.5's RecentReactions): the last six used on this phone, in place, Instagram's six
+ * until then; our current one always there.
+ */
+object RecentReactions {
+    val defaults = listOf("❤️", "😂", "😮", "😢", "🔥", "👍")
+
+    fun row(stored: List<String>?): List<String> {
+        val row = stored.orEmpty().take(defaults.size).toMutableList()
+        for (key in defaults) if (row.size < defaults.size && row.none { Message.Reaction.same(it, key) }) row += key
+        return row
+    }
+
+    /** Already there: nothing moves under the thumb. Else it goes first and the oldest drops. */
+    fun adding(key: String, row: List<String>): List<String> =
+        if (row.any { Message.Reaction.same(it, key) }) row else (listOf(key) + row).take(defaults.size)
+
+    /** Our current reaction, in the last place when it isn't one of the six: it's how to remove it. */
+    fun shown(row: List<String>, current: String?): List<String> =
+        if (current == null || row.any { Message.Reaction.same(it, current) }) row else row.dropLast(1) + current
+}
+
 data class PendingMessage(val txnID: String, val content: JsonElement, val ts: Long, val state: State) {
     sealed interface State {
         data object Sending : State

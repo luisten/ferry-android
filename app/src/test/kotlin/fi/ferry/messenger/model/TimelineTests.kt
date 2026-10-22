@@ -198,6 +198,23 @@ class TimelineTests {
         assertEquals(0, Timeline.newCount(messages, after = 700))
     }
 
+    /** The long press's reactions (iOS's ReactionPickerTests): the last six used, in place; ours always there. */
+    @Test fun recentsStayInPlaceAndTheNewestGoesFirst() {
+        assertEquals(listOf("❤️", "😂", "😮", "😢", "🔥", "👍"), RecentReactions.row(null))
+        assertEquals(listOf("🙈", "❤️", "😂", "😮", "😢", "🔥"), RecentReactions.row(listOf("🙈"))) // the defaults pad it
+        val row = RecentReactions.row(null)
+        assertEquals(row, RecentReactions.adding("🔥", row)) // already there: nothing moves under the thumb
+        assertEquals(row, RecentReactions.adding("❤", row)) // Instagram's heart is the same heart
+        assertEquals(listOf("🙈", "❤️", "😂", "😮", "😢", "🔥"), RecentReactions.adding("🙈", row))
+    }
+
+    @Test fun ourReactionIsShownEvenWhenItIsNotRecent() {
+        val row = RecentReactions.row(null)
+        assertEquals(listOf("❤️", "😂", "😮", "😢", "🔥", "🦖"), RecentReactions.shown(row, "🦖"))
+        assertEquals(row, RecentReactions.shown(row, "❤"))
+        assertEquals(row, RecentReactions.shown(row, null))
+    }
+
     /** A reaction is the same with or without its variation selector: we send "❤️", Instagram echoes "❤". */
     @Test fun instagramsHeartIsOurs() {
         val events = listOf(
