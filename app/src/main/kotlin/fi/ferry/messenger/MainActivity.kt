@@ -31,7 +31,9 @@ class MainActivity : ComponentActivity() {
         // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska.
         val demo = debuggable && intent.getBooleanExtra("demo", false)
         AppModel.start(applicationContext, demo, requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable },
-            demoSignedOut = demo && intent.getBooleanExtra("signed_out", false))
+            demoSignedOut = demo && intent.getBooleanExtra("signed_out", false),
+            // A live account shown signed out (nothing reaches Instagram) until it logs in again: A3's live check.
+            signedOut = intent.getStringExtra("signed_out_account")?.takeIf { debuggable && !demo })
         if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
         setContent { FerryTheme { App() } }
     }

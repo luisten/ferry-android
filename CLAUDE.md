@@ -126,7 +126,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   (`IGStop`), deletes its session and identity and drops its chats; its archive and Requests markers stay, hidden.
   Health: `Inbox.banner` (offline after 2 failed connects with none connected, else the account in trouble),
   "Later" hides it until it changes; a signed-out account's chats get `RecoveryBar` instead of the composer.
-  Demo switches: `--ez signed_out true` (Kivo signed out), `--ez naming true` (O5 for Tamo).
+  Demo switches: `--ez signed_out true` (Kivo signed out), `--ez naming true` (O5 for Tamo); live, `--es
+  signed_out_account <id>` shows that account signed out (locally, nothing sent) until it logs in again (A3's check).
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
   SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told.
 - **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,

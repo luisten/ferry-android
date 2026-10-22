@@ -116,11 +116,14 @@ object AppModel {
     /** Our photos, GIFs, videos and voice notes on their way or failed, by transaction ID: Retry sends the same file. */
     private val outgoing = mutableMapOf<String, Attachment>()
     private var started = false
+    /** Debug builds: a live account shown signed out until it logs in again (iOS's overridingStates), to check A3. */
+    private var forcedSignedOut: String? = null
     /** Accounts logged in by mistake while fixing another (A3): stopped, and their updates dropped. */
     private val strangers = mutableSetOf<String>()
 
     /** Once per process: every stored account connects, an Instagram action each (index, mailbox, folders, socket). */
-    fun start(context: Context, demo: Boolean, requestRoom: String? = null, demoSignedOut: Boolean = false) {
+    fun start(context: Context, demo: Boolean, requestRoom: String? = null, demoSignedOut: Boolean = false, signedOut: String? = null) {
+        forcedSignedOut = signedOut
         if (started) return
         started = true
         this.demo = demo
@@ -572,6 +575,10 @@ object AppModel {
             return loginFailed("That was @${login.viewer.username ?: "another account"}. Log in as $wanted to fix it.")
         }
         strangers -= id
+        if (resumed == null && id == forcedSignedOut) { // logged in again: the real state shows
+            forcedSignedOut = null
+            updateAccounts()
+        }
         val isNew = resumed == null && id !in statuses
         syncFailures = 0
         running += id
@@ -616,7 +623,8 @@ object AppModel {
     private fun updateAccounts() {
         val logins = statuses.keys.sorted().map { id ->
             val s = statuses.getValue(id)
-            IGAdapter.login(id, viewers[id], s.state, s.message, s.since, if (s.state == "TRANSIENT_DISCONNECT") s.since else null)
+            val state = if (id == forcedSignedOut) "BAD_CREDENTIALS" else s.state
+            IGAdapter.login(id, viewers[id], state, s.message, s.since, if (state == "TRANSIENT_DISCONNECT") s.since else null)
         }
         accounts = logins
         loginIDs = logins.map { it.id }.toSet()
