@@ -125,9 +125,9 @@ class TapTarget {
 
 val LocalTap = compositionLocalOf<TapTarget?> { null }
 
-/** A card's own tap (in an opened set): holding it still opens the message's sheet, as everywhere in a bubble. */
+/** A card's own tap (in an opened set, a link's preview): holding it still opens the message's sheet, as everywhere in a bubble. */
 @Composable
-private fun Modifier.ownTap(action: () -> Unit): Modifier {
+fun Modifier.ownTap(action: () -> Unit): Modifier {
     val hold = LocalTap.current?.hold
     return combinedClickable(onLongClickLabel = hold?.let { "React or reply" }, onLongClick = hold, onClick = action)
 }

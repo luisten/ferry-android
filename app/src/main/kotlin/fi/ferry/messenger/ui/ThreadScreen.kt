@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -75,10 +76,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -329,7 +333,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                 ThreadHeader(room, identity, back, openInfo = { info = true }) { MoreMenu(room) { info = true } }
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
-                CompositionLocalProvider(LocalMedia provides media) { Box(Modifier.fillMaxSize()) {
+                CompositionLocalProvider(LocalMedia provides media, LocalViewConfiguration provides quickHold(LocalViewConfiguration.current)) { Box(Modifier.fillMaxSize()) {
                     LazyColumn(Modifier.fillMaxSize().alpha(if (revealed) 1f else 0f), state = list, reverseLayout = true,
                         contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 8.dp)) {
                         if (typing) item("typing") { TypingBubble(Modifier.padding(top = 10.dp, start = if (isGroup) GROUP_INDENT else 0.dp)) }
@@ -369,6 +373,17 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
             },
             dismissButton = { TextButton({ confirmingDelete = false }) { Text("Cancel") } },
         )
+    }
+}
+
+/**
+ * iOS 1.5.1: holding a bubble or card brings its sheet up after 0.3 s, as the mic's hold (Android's default is 0.4 s,
+ * older ones' 0.5 s). A longer delay chosen in Android's accessibility settings stays.
+ */
+@Composable
+private fun quickHold(system: ViewConfiguration): ViewConfiguration = remember(system) {
+    if (system.longPressTimeoutMillis > 500) system else object : ViewConfiguration by system {
+        override val longPressTimeoutMillis: Long get() = 300
     }
 }
 
@@ -598,19 +613,37 @@ private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color,
             )
         }
         MessageKind.Text, MessageKind.Notice -> TextBubble(message.body, shape, fill, text)
-        MessageKind.Link -> {
-            val preview = LinkPreview.of(message.content)
-            Column(Modifier.background(fill, shape).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Text(message.body, style = MaterialTheme.typography.bodyLarge, color = text)
-                if (preview != null) {
-                    Spacer(Modifier.height(6.dp))
-                    preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
-                    Text(parseURL(preview.url)?.host.orEmpty(), style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f))
-                }
-            }
-        }
+        MessageKind.Link -> LinkBubble(message, shape, fill, text)
         // ponytail: a labelled card until A6 shows the media itself (photos, videos, voice, GIFs, shares).
         else -> MediaBubble(message, kind) { MediaPlaceholder(kind, message, shape, fill, text) }
+    }
+}
+
+/**
+ * A text with the engine's link preview under it (as iOS, DESIGN §13): its picture (240 wide, between 0.4 and 1 of
+ * that tall), title and site. The preview is the link: a tap opens it, a hold is the message's.
+ */
+@Composable
+private fun LinkBubble(message: Message, shape: RoundedCornerShape, fill: Color, text: Color) {
+    val preview = LinkPreview.of(message.content)
+    val context = LocalContext.current
+    Column(Modifier.then(if (preview != null) Modifier.width(240.dp) else Modifier).clip(shape).background(fill)) {
+        Text(message.body, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge, color = text)
+        if (preview == null) return@Column
+        Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.06f))
+            .ownTap { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(preview.url))) }) {
+            preview.imageURL?.let { url ->
+                val px = with(LocalDensity.current) { 240.dp.roundToPx() }
+                Box(Modifier.fillMaxWidth().height(240.dp * (preview.aspect ?: 0.525).coerceIn(0.4, 1.0).toFloat())
+                    .background(MaterialTheme.colorScheme.surfaceVariant)) {
+                    Pictures.load(url, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                }
+            }
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
+                Text(parseURL(preview.url)?.host ?: preview.url, style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f))
+            }
+        }
     }
 }
 

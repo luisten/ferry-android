@@ -7,7 +7,8 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** iOS 1.1–1.2's last gaps (2026-10-22): Chat Info (`ui/ChatInfo.kt`) and the person card, Share in the
+**Status:** iOS 1.5.1 (2026-10-23): the 0.3 s hold, holding any card (an opened set's too), and the link preview's
+picture and tap, the last a gap from before; checked on the demo. iOS 1.1–1.2's last gaps (2026-10-22): Chat Info (`ui/ChatInfo.kt`) and the person card, Share in the
 photo viewer and Share All, swipe to archive, pull to refresh, drag to reorder accounts; checked on the demo. With it
 Android has all of iOS 1.0–1.5. iOS 1.5 parity (2026-10-22): the iOS logo and launch screen; a chat that opens unread holds its "New
 messages" line; the jump-to-newest button; listening back to a voice note; the long press's reaction sheet with recent
@@ -152,7 +153,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   new reaches less than a quarter screen past it; hidden until placed (1 s at most). The list is reversed, so the
   placement measures offsets after `scrollToItem` (a chat's start clamps it). A touch, the jump button or a send
   lets go. Only a send from this phone follows the end (`Message.isLocalEcho`). Demo: `--ez busy true`.
-- **The long press opens a sheet** (iOS 1.5): the message named in one line, `RecentReactions` (tested; stored in
+- **The long press opens a sheet** (iOS 1.5; 0.3 s since iOS 1.5.1, `quickHold` in the thread's list, Android's own
+  0.4 s elsewhere; a longer delay chosen in accessibility settings stays): the message named in one line, `RecentReactions` (tested; stored in
   SharedPreferences, recorded when adding) and "+" (a field for the keyboard's emoji, `isEmoji`), then Reply, Copy,
   Edit, Share All (photos and videos sent together), Open in Instagram, Unsend/Delete, each run once the sheet is gone.
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in

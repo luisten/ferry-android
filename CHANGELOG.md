@@ -48,3 +48,5 @@ What changes for people who use the app, in plain words. The format is
 - Swipe a chat left to archive it, or to bring it back from Archived.
 - Pull down the chat list to reconnect an account that couldn't connect.
 - Touch and hold an account in Accounts, then drag it, to change their order.
+- A link's preview shows its picture, and a tap on it opens the link.
+- Touching and holding a message brings up the reactions sooner.

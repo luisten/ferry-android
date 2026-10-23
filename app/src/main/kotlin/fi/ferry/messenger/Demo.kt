@@ -12,8 +12,10 @@ import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.UserProfile
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
@@ -172,8 +174,8 @@ object Demo {
     }
 
     /**
-     * One chat of media in the engine's shapes (core/chat): an album, a voice note, a reel to load, a video, a GIPHY
-     * sticker. Their links go nowhere (`example.invalid`), so the cards show their layout and a failed download.
+     * One chat of media in the engine's shapes (core/chat): an album, a voice note, a link with its preview, a reel to
+     * load, a video, a GIPHY sticker. Their links go nowhere (`example.invalid`), so the cards show their layout and a failed download.
      */
     private fun media(now: Long): Room {
         val mira = "17841400000000205"
@@ -191,6 +193,15 @@ object Demo {
                 put("msgtype", "m.audio"); put("body", ""); put("url", "$cdn-voice.m4a")
                 putJsonObject("info") { put("mimetype", "audio/mp4"); put("duration", 12_500) }
                 putJsonObject("org.matrix.msc3245.voice") {}
+            }),
+            Triple(false, 70, buildJsonObject {
+                put("msgtype", "m.text"); put("body", "This place for Sunday? https://harborview.example/brunch")
+                putJsonArray("com.beeper.linkpreviews") {
+                    addJsonObject {
+                        put("matched_url", "https://harborview.example/brunch"); put("og:title", "Harborview: brunch on the water")
+                        put("og:image", "$cdn-link.jpg"); put("og:image:width", 1200); put("og:image:height", 630)
+                    }
+                }
             }),
             Triple(false, 60, buildJsonObject {
                 put("msgtype", "m.video"); put("body", ""); put("external_url", "https://www.instagram.com/reel/DEMO123/")
