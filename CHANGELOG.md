@@ -67,3 +67,5 @@ What changes for people who use the app, in plain words. The format is
 - Pick several photos and videos at once with +, or paste them into the message field. They're sent one after
   another, in the order you picked them, and then your text.
 - Take a photo or record a video with the camera straight from + in a chat.
+- Turning the phone, switching to dark mode or changing the text size keeps you in the chat, with what you were
+  writing.

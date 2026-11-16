@@ -3,6 +3,7 @@ package fi.ferry.messenger
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.os.Bundle
@@ -72,6 +73,15 @@ class MainActivity : ComponentActivity() {
         }
         val clip = ClipData("Demo photos", arrayOf("image/jpeg"), ClipData.Item(uris[0])).apply { addItem(ClipData.Item(uris[1])) }
         getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+    }
+
+    /**
+     * Rotation, dark mode, font size (`configChanges`): no recreation, Compose redraws. The system bars' icons are set
+     * light or dark once by `enableEdgeToEdge`, so they're set again for the new mode.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        enableEdgeToEdge()
     }
 
     /** A notification tapped while Ferry was open (`singleTop`). */

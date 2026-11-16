@@ -21,8 +21,11 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.Ferry">
+        <!-- Rotation, dark mode, font size and the like don't recreate it (Compose redraws with the new configuration): the
+             open chat stays, with its draft, reply and waiting photos (decision A51). -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboard|keyboardHidden|navigation|density|fontScale"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
