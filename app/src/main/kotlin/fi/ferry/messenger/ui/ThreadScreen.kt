@@ -3,8 +3,8 @@ package fi.ferry.messenger.ui
 import android.content.ActivityNotFoundException
 import android.content.pm.PackageManager
 import android.icu.lang.UCharacter
-import android.net.Uri
 import android.icu.lang.UProperty
+import android.net.Uri
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -48,11 +48,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -217,8 +217,10 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     // Photos and videos waiting above the field, in the order they go (iOS 1.7: up to 10). Not kept past the thread.
     val items = remember(roomID) { mutableStateListOf<ComposerItem>() }
     val context = LocalContext.current
-    /** Each waits as "Preparing…" until `Outgoing` has it ready; one that can't be sent goes, with why. */
-    /** `copy`: pasted, so read at once (`Outgoing.prepare`). `captured`: the camera's file, which goes once it's read. */
+    /**
+     * Each waits as "Preparing…" until `Outgoing` has it ready; one that can't be sent goes, with why. `copy`: pasted, so
+     * read at once (`Outgoing.prepare`). `captured`: the camera's file, which goes once it's read.
+     */
     fun add(uris: List<Uri>, copy: Boolean = false, captured: File? = null) {
         val left = MAX_ATTACHMENTS - items.size
         if (uris.size > left) AppModel.actionError = "You can send up to $MAX_ATTACHMENTS photos and videos at a time."
@@ -298,10 +300,10 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     )
     fun send() {
         val text = draft.text.toString().trim()
-        val media = items.mapNotNull { it.ready }
-        if (media.size < items.size) return // one is still being prepared
-        if (text.isEmpty() && media.isEmpty() || text.length > Timeline.MAX_TEXT_LENGTH) return
         val edited = editing
+        val media = if (edited != null) emptyList() else items.mapNotNull { it.ready }
+        if (media.size < items.size && edited == null) return // one is still being prepared
+        if (text.isEmpty() && media.isEmpty() || text.length > Timeline.MAX_TEXT_LENGTH) return
         if (edited != null) {
             if (text.isNotEmpty() && text != edited.body) AppModel.edit(edited, text, room)
         } else {
