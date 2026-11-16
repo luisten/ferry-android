@@ -181,6 +181,8 @@ class TimelineTests {
             Event("m.room.message", obj("msgtype" to "m.text", "body" to "* fixed", "m.relates_to" to mapOf("rel_type" to "m.replace", "event_id" to "\$new")),
                 "\$edit", ghost, originServerTS = 210),
             reaction("\$r", "\$new", "❤", ghost, ts = 220),
+            // Android's own (D2): iOS has no notifications. A reaction log entry makes the chat unread but never notifies.
+            message("\$log", 230, sender = ghost, msgtype = "m.notice", extra = mapOf(MessageKind.REACTION_LOG_KEY to true)),
         )
         assertEquals(listOf("\$new"), Timeline.notifiable(events, me, since).map { it.eventID })
     }

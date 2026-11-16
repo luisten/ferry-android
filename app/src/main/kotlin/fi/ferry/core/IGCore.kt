@@ -38,6 +38,14 @@ object IGCore {
     @JvmStatic external fun unsend(room: ByteArray, message: ByteArray): ByteArray?
     @JvmStatic external fun markRead(room: ByteArray): ByteArray?
     @JvmStatic external fun typing(room: ByteArray, on: Boolean): ByteArray?
+
+    /**
+     * Not called on Android: E8 keeps the sockets open while Ferry is closed (iOS calls them when it leaves the
+     * screen and comes back).
+     */
+    @JvmStatic external fun pause()
+    @JvmStatic external fun unpause()
+
     @JvmStatic external fun counts(): ByteArray?
     @JvmStatic external fun session(account: ByteArray): ByteArray?
     @JvmStatic external fun stop(account: ByteArray)

@@ -743,7 +743,10 @@ object AppModel {
                 setStatus(id, "CONNECTING")
                 thread { storeSession(id) }
             }
-            "LoginFailed" -> failed(id, update.code ?: "UNKNOWN_ERROR", update.error)
+            "LoginFailed" -> { // a retry, or the engine's own re-login after a resnapshot: Try Again may connect it again
+                running -= id
+                failed(id, update.code ?: "UNKNOWN_ERROR", update.error)
+            }
             "Room" -> apply(update)
             "RoomRemoved" -> update.room?.let { roomsState.value.remove(it) }
         }

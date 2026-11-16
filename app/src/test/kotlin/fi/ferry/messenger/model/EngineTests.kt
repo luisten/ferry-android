@@ -155,6 +155,18 @@ class EngineTests {
         assertNull(MediaInfo(bare.content).url)
     }
 
+    /**
+     * Photos and videos from Instagram's in-chat camera (live 2026-10-24, `ig_camera_media_tamo`): kept in chat, the
+     * same cards as camera-roll media; view once and allow replay stay a view-once line. Ferry showed the kept photo as
+     * view-once and the video as a message it couldn't show.
+     */
+    @Test fun cameraPhotosAndVideos() {
+        val thread = Timeline.reduce(events("camera_media_tamo", "thread"), me)
+        assertEquals(listOf(MessageKind.ViewOnce, MessageKind.ViewOnce, MessageKind.Image, MessageKind.Video), thread.map { it.kind })
+        assertEquals("https://scontent.example.invalid/v/c004.jpg", MediaInfo(thread[2].content).url)
+        assertEquals("https://scontent.example.invalid/v/c010.mp4", MediaInfo(thread[3].content).url)
+    }
+
     /** Three photos sent at once from the Instagram app: one message with every photo, in order. */
     @Test fun photosSentTogetherAreOneMessageWithAll() {
         val messages = Timeline.reduce(events("message_photos_tamo", "thread"), me)

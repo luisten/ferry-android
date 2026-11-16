@@ -80,6 +80,8 @@ sealed interface MessageKind {
 
     companion object {
         const val EVENT_KEY = "fi.ferry.event"
+        /** `core/chat`'s reaction log entry (`isReactionLog`). */
+        const val REACTION_LOG_KEY = "fi.ferry.reactionLog"
         const val UNSUPPORTED_KEY = "fi.ferry.unsupported"
         /** The text sent with a share: a story reply, or a story reaction's emoji. */
         const val SHARE_TEXT_KEY = "fi.ferry.share_text"
@@ -407,7 +409,9 @@ object Timeline {
             }
         }
 
-        val messages = bases.mapTo(mutableListOf()) { base ->
+        // Instagram's "Reacted ❤️ to your message" entry is no row (the reaction is on the message); only the inbox
+        // reads it, as the chat's newest message.
+        val messages = bases.filter { it.content[MessageKind.REACTION_LOG_KEY] == null }.mapTo(mutableListOf()) { base ->
             val id = base.eventID.orEmpty()
             val sender = base.sender.orEmpty()
             if (isRedacted(base)) {
@@ -476,12 +480,14 @@ object Timeline {
     }
 
     /**
-     * A live update's messages worth a notification (A8): from someone else, not an edit, newer than `since` (the
+     * A live update's messages worth a notification (A8): from someone else, not an edit, not a reaction log entry
+     * (the user's call: reactions don't notify on Android; they still make the chat unread), newer than `since` (the
      * process's start: older ones were there at launch or came with history).
      */
     fun notifiable(events: List<Event>, me: String, since: Long): List<Event> = events.filter { e ->
         (e.type == "m.room.message" || e.type == "m.sticker") && e.sender != me && e.eventID != null &&
-            e.content["m.relates_to"]["rel_type"].string != "m.replace" && (e.originServerTS ?: 0) > since
+            e.content["m.relates_to"]["rel_type"].string != "m.replace" && e.content[MessageKind.REACTION_LOG_KEY] == null &&
+            (e.originServerTS ?: 0) > since
     }
 
     /**

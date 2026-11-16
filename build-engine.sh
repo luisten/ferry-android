@@ -7,7 +7,7 @@ set -eu
 cd "$(dirname "$0")"
 
 want=go1.27.3
-have=$(go env GOVERSION)
+have=$(GOTOOLCHAIN=local go env GOVERSION) # local: an older Go would otherwise fetch the toolchain line's by itself
 [ "$have" = "$want" ] || { echo "build-engine.sh: need $want on PATH, found $have" >&2; exit 1; }
 ndk=${ANDROID_NDK_HOME:-$HOME/Library/Android/sdk/ndk/30.0.16248370}
 api=26 # minSdk, Android 8.0

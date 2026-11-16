@@ -50,3 +50,7 @@ What changes for people who use the app, in plain words. The format is
 - Touch and hold an account in Accounts, then drag it, to change their order.
 - A link's preview shows its picture, and a tap on it opens the link.
 - Touching and holding a message brings up the reactions sooner.
+- When someone reacts to your message, the chat moves to the top of your inbox, unread, and says "Liked a message" or
+  "Reacted 😂 to your message", as in Instagram. Reactions don't send a notification.
+- Photos and videos taken with Instagram's own camera in a chat show as photos and videos when they're kept in the
+  chat.

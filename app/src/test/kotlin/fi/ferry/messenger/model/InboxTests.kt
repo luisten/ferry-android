@@ -366,6 +366,22 @@ class InboxTests {
         assertNull(Inbox.preview(Room("!empty"), Fixture.me))
     }
 
+    /**
+     * A reaction to our message (`core/chat`'s reaction log entry): no row in the thread, but the chat's newest message,
+     * so it moves the chat up and is the preview, as in Instagram (option B, 2026-11-10).
+     */
+    @Test fun reactionLogIsThePreviewButNoRow() {
+        val room = portal("!p", Fixture.tamoLogin)
+        room.apply(timeline(
+            message("\$1", 9, Fixture.me, "see you there"),
+            message("\$log", 20, Fixture.kivoGhost, "Reacted 😂 to your message", msgtype = "m.notice",
+                extra = mapOf(MessageKind.REACTION_LOG_KEY to true)),
+        ))
+        assertEquals("Reacted 😂 to your message", Inbox.preview(room, Fixture.me)?.text)
+        assertEquals(20L, room.lastActivity)
+        assertEquals("\$1", Timeline.reduce(room, Fixture.me).last().id)
+    }
+
     @Test fun replyPreviewStripsTheFallback() {
         val room = portal("!p", Fixture.tamoLogin)
         room.apply(timeline(message("\$r", 9, Fixture.kivoGhost, "> <@x> hi\n\nhello back",
