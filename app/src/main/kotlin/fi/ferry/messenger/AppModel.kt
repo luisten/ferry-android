@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import fi.ferry.core.IGCore
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.BridgeAPI
+import fi.ferry.messenger.model.Event
 import fi.ferry.messenger.model.IG
 import fi.ferry.messenger.model.IGAdapter
 import fi.ferry.messenger.model.Inbox
@@ -125,6 +126,8 @@ object AppModel {
     private lateinit var appContext: Context
     /** Messages from before this process aren't news: they were there at launch, or came with history. */
     private var startedAt = 0L
+    /** The demo group's older messages, oldest first, still to load (`--ei group_older`). */
+    private var debugOlder = mutableListOf<Event>()
     /** Debug builds: a live account shown signed out until it logs in again (iOS's overridingStates), to check A3. */
     private var forcedSignedOut: String? = null
     /** Accounts logged in by mistake while fixing another (A3): stopped, and their updates dropped. */
@@ -139,6 +142,9 @@ object AppModel {
         signedOut: String? = null,
         demoIncoming: Boolean = false,
         demoBusy: Boolean = false,
+        demoReaction: Boolean = false,
+        demoGroupOlder: Int = 0,
+        demoGroupExtra: Int = 0,
     ) {
         forcedSignedOut = signedOut
         if (started) return
@@ -149,7 +155,7 @@ object AppModel {
         Notifier.channels(appContext)
         MediaFiles.init(context)
         Outgoing.sweep(context)
-        if (demo) return loadDemo(demoSignedOut, demoIncoming, demoBusy)
+        if (demo) return loadDemo(demoSignedOut, demoIncoming, demoBusy, demoReaction, demoGroupOlder, demoGroupExtra)
         requestRoom?.let { IGCore.setDebug(false, it.encodeToByteArray()) }
         prefs = context.getSharedPreferences("ferry", Context.MODE_PRIVATE)
         sessions = Sessions(context)
@@ -168,10 +174,12 @@ object AppModel {
     }
 
     /** `signedOut`: Kivo Studio needs a login (the banner, the thread's bar, A3). */
-    private fun loadDemo(signedOut: Boolean, incoming: Boolean, busy: Boolean) {
+    private fun loadDemo(signedOut: Boolean, incoming: Boolean, busy: Boolean, reaction: Boolean, groupOlder: Int, groupExtra: Int) {
         viewers += Demo.viewers
         for (id in Demo.viewers.keys) statuses[id] = Status(if (signedOut && id == Demo.KIVO) "BAD_CREDENTIALS" else "CONNECTED", null, now())
-        roomsState.value = Demo.rooms(now(), busy).associateByTo(mutableMapOf()) { it.id }
+        roomsState.value = Demo.rooms(now(), busy, groupExtra).associateByTo(mutableMapOf()) { it.id }
+        // `--ei group_older <n>`: the group opens from five messages and its spinner loads the rest (`loadOlder`).
+        if (groupOlder > 0) rooms["!debug-group"]?.let { debugOlder = Demo.mailboxCopy(it, groupOlder).toMutableList() }
         profiles = Demo.profiles
         loaded += Demo.viewers.keys
         updateAccounts()
@@ -182,6 +190,16 @@ object AppModel {
             val room = rooms[id] ?: return@postDelayed
             room.apply(fi.ferry.messenger.model.JoinedRoom(timeline = fi.ferry.messenger.model.JoinedRoom.Timeline(listOf(event), limited = false)))
             notify(room, Timeline.notifiable(listOf(event), ME, startedAt))
+            refresh()
+        }, 10_000)
+        // `--ez reaction true`: Jonas Berg's chat gets a reaction and Instagram's log entry for it 10 s in (E2: the chat
+        // moves up, unread, with the words; D2: no notification, so `notify` must find nothing).
+        if (reaction) main.postDelayed({
+            val (id, events, unread) = Demo.reaction(now())
+            val room = rooms[id] ?: return@postDelayed
+            room.apply(fi.ferry.messenger.model.JoinedRoom(timeline = fi.ferry.messenger.model.JoinedRoom.Timeline(events, limited = false),
+                unreadNotifications = unread))
+            notify(room, Timeline.notifiable(events, ME, startedAt))
             refresh()
         }, 10_000)
     }
@@ -291,6 +309,18 @@ object AppModel {
     fun loadOlder(room: Room) {
         val cursor = room.prevBatch ?: return
         if (room.reachedStart || room.id in paginating) return
+        if (demo && cursor.startsWith("debug-older")) { // `--ei group_older`: 20 a page, half a second each
+            val chunk = debugOlder.takeLast(20).asReversed()
+            repeat(chunk.size) { debugOlder.removeAt(debugOlder.lastIndex) }
+            val page = MessagesPage(chunk, end = if (debugOlder.isEmpty()) null else "debug-older-${debugOlder.size}")
+            paginating = paginating + room.id
+            main.postDelayed({
+                paginating = paginating - room.id
+                room.prepend(page, cursor)
+                refresh()
+            }, 500)
+            return
+        }
         if (cursor == IGAdapter.START_TOKEN || demo) {
             room.prepend(MessagesPage(), cursor)
             roomsState.value = roomsState.value

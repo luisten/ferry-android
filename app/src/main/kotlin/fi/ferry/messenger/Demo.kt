@@ -8,8 +8,10 @@ import fi.ferry.messenger.model.IGAdapter
 import fi.ferry.messenger.model.JoinedRoom
 import fi.ferry.messenger.model.MessageKind
 import fi.ferry.messenger.model.MessagesPage
+import fi.ferry.messenger.model.PendingMessage
 import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.UserProfile
+import fi.ferry.messenger.model.emptyObject
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
@@ -17,15 +19,27 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * Debug builds only (`adb shell am start -n fi.ferry.messenger/.MainActivity --ez demo true`): made-up accounts and chats
  * (the iOS app's FERRY_DEBUG_DEMO, with its requests and group), for checking the screens and taking screenshots.
  * The stored accounts are left alone and the engine isn't even loaded, so nothing reaches Instagram.
+ *
+ * Besides the iOS app's chats: Ada Lind (several days, links, emoji, a tombstone and a failed message, for 1.7's day
+ * chips, times and links), Ravi Shah (a reaction log entry, which moves the chat up without a row), Elena's photo
+ * without a URL, and the iOS group's reactions. Switches (`MainActivity`): `--ez reaction true` brings a reaction to
+ * Jonas Berg 10 s in, `--ei group_older <n>` opens the group from a five-message window with `n` pages of 20 older
+ * messages after the group's own, `--ei group_extra <n>` adds `n` unread messages to the group.
  */
 object Demo {
     const val TAMO = "17841400000000301"
     const val KIVO = "17841400000000302"
+    private const val ADA = "17841400000000206"
+    private const val RAVI = "17841400000000207"
+    /** The chat of `--ez reaction true`: Jonas Berg (read), whose first message is ours. */
+    private const val REACTION_ROOM = "!debug-demo-3"
 
     val viewers = mapOf(
         TAMO to IG.Viewer(fbid = TAMO, username = "tamoveska", fullName = "Tamo Veska", isProfessionalAccount = false),
@@ -65,11 +79,44 @@ object Demo {
         maya to UserProfile("Maya Chen", handle = "maya.chen"),
         sam to UserProfile("Sam Lee"),
         priya to UserProfile("Priya Nair", handle = "priya.n"),
+        IGAdapter.user(ADA) to UserProfile("Ada Lind", handle = "ada.lind"),
+        IGAdapter.user(RAVI) to UserProfile("Ravi Shah", handle = "ravi.shah"),
     )
 
     /** A message from Noor, now: the demo's live update (`--ez incoming true`). */
     fun incoming(now: Long): Pair<String, Event> =
         "!debug-demo-1" to text("\$debug-incoming-$now", IGAdapter.user(chats[0].fbid), now, "Running 5 min late, save me a seat!")
+
+    /**
+     * A live reaction to our first message in Jonas Berg's chat, as the engine sends it (`--ez reaction true`): the
+     * reaction, and Instagram's log entry for it (`<log id>~log`), with the chat unread. Never a notification (D2).
+     */
+    fun reaction(now: Long): Triple<String, List<Event>, JoinedRoom.UnreadCounts> {
+        val jonas = IGAdapter.user(chats[2].fbid)
+        val key = "😮"
+        val reaction = Event("m.reaction", buildJsonObject {
+            putJsonObject("m.relates_to") { put("rel_type", "m.annotation"); put("event_id", "\$$REACTION_ROOM-0"); put("key", key) }
+        }, "\$debug-live-reaction", jonas, originServerTS = now)
+        val log = Event("m.room.message", buildJsonObject {
+            put("msgtype", "m.notice"); put("body", "Reacted $key to your message"); put(MessageKind.REACTION_LOG_KEY, true)
+        }, "\$debug-live-log~log", jonas, originServerTS = now)
+        return Triple(REACTION_ROOM, listOf(reaction, log), JoinedRoom.UnreadCounts(1, 0))
+    }
+
+    /**
+     * The group as Instagram's mailbox has it (`--ei group_older`): its newest five timeline events, a fresh window
+     * (so its state stays) with a cursor, and what its top spinner has still to load, oldest first: the rest of the group,
+     * after `pages` pages of 20 made-up messages a minute apart, then the group's own earlier ones.
+     */
+    fun mailboxCopy(group: Room, pages: Int): List<Event> {
+        val timeline = group.events.filter { it.stateKey == null }.sortedBy { it.originServerTS ?: 0 }
+        val first = timeline.firstOrNull()?.originServerTS ?: 0
+        val older = (0 until pages * 20).reversed().map { n ->
+            text("\$debug-group-older-$n", listOf(theo, maya, sam)[n % 3], first - (n + 1) * 60_000L, "Older message ${n + 1}")
+        }
+        group.apply(JoinedRoom(timeline = JoinedRoom.Timeline(timeline.takeLast(5), limited = true, prevBatch = "debug-older")))
+        return older + timeline.dropLast(5)
+    }
 
     /** New Message's search: the made-up people whose name or handle has `query` (their DMs open; the group's don't). */
     fun contacts(query: String): List<BridgeAPI.Contact> = profiles.mapNotNull { (user, p) ->
@@ -79,16 +126,17 @@ object Demo {
     }
 
     /** `busy` (`--ez busy true`): Harbor Coffee read up to our reply, then 30 new messages, more than a screen. */
-    fun rooms(now: Long, busy: Boolean = false): List<Room> =
+    fun rooms(now: Long, busy: Boolean = false, groupExtra: Int = 0): List<Room> =
         chats.mapIndexed { i, c ->
             val more = if (busy && i == 1) (1..28).map { Line(false, 39L - it, "Detail $it of the shoot plan") } else emptyList()
             dm("!debug-demo-${i + 1}", c.name, c.fbid, c.account, request = false, c.unread + more.size,
                 (c.lines + more).map { Triple(it.fromMe, now - it.minutesAgo * 60_000, it.text) },
-                readUpTo = if (busy && i == 1) now - 90 * 60_000 else null)
-        } +
+                readUpTo = if (busy && i == 1) now - 90 * 60_000 else null,
+                extras = { start -> if (c.handle == "elena.rossi") listOf(photoWithoutURL(IGAdapter.user(c.fbid), start + 500)) else emptyList() })
+        } + days(now) + ravi(now) +
         requests.mapIndexed { i, r -> dm("!debug-request-${i + 1}", r.name, r.fbid, r.account, request = true, r.unread,
             r.texts.mapIndexed { j, t -> Triple(false, now - r.minutesAgo * 60_000 + j * 40_000, t) }) } +
-        group(now) + media(now)
+        group(now, groupExtra) + media(now)
 
     /** The engine's `m.bridge` (core/chat): whose chat, with whom, a DM or (no room type) a group. */
     private fun bridge(name: String, channel: String, account: String, request: Boolean, dm: Boolean): JsonElement = buildJsonObject {
@@ -112,7 +160,7 @@ object Demo {
 
     private fun dm(
         id: String, name: String, fbid: String, account: String, request: Boolean, unread: Int, lines: List<Triple<Boolean, Long, String>>,
-        readUpTo: Long? = null,
+        readUpTo: Long? = null, extras: (start: Long) -> List<Event> = { emptyList() },
     ): Room {
         val ghost = IGAdapter.user(fbid)
         val start = (lines.minOfOrNull { it.second } ?: 0) - 1000
@@ -120,7 +168,8 @@ object Demo {
             state("m.bridge", "instagram", bridge(name, fbid, account, request, dm = true), start),
             state("m.room.name", "", buildJsonObject { put("name", name) }, start),
             state("m.room.member", ghost, member(name), start, ghost),
-        ) + lines.mapIndexed { j, (fromMe, ts, body) -> text("\$$id-$j", if (fromMe) IGAdapter.ME else ghost, ts, body) }
+        ) + (lines.mapIndexed { j, (fromMe, ts, body) -> text("\$$id-$j", if (fromMe) IGAdapter.ME else ghost, ts, body) } + extras(start))
+            .sortedBy { it.originServerTS }
         val receipt = readUpTo?.let { ts ->
             val upTo = lines.indexOfLast { it.second <= ts }
             Event("m.receipt", buildJsonObject {
@@ -130,11 +179,81 @@ object Demo {
         return room(id, events, unread, receipt)
     }
 
+    /** An `m.image` with no `url`: a "Photo" card that loads nothing, for the long press and the swipe on a card. */
+    private fun photoWithoutURL(sender: String, ts: Long) = Event("m.room.message", buildJsonObject {
+        put("msgtype", "m.image"); put("body", "print.jpg")
+        putJsonObject("info") { put("w", 1080); put("h", 1350); put("mimetype", "image/jpeg") }
+    }, "\$debug-demo-photo", sender, originServerTS = ts)
+
+    /**
+     * Ada Lind: a chat over more than a year, for 1.7's day chips and bubble times. Built from local midnight (not
+     * `now` minus minutes, which moves with the hour): a message 400 days ago (the year shows), 10 days ago ("Mon 3 Nov"),
+     * 3 days ago (the weekday), a pair at 23:59 and 00:01 (a run broken by the day), yesterday, and 15 today with
+     * links, emoji, a long text, an unsent one of ours and a failed one (no echo, "Not sent").
+     */
+    private fun days(now: Long): Room {
+        val zone = ZoneId.systemDefault()
+        val midnight = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().atStartOfDay(zone)
+        fun at(daysAgo: Long, hour: Int, minute: Int) = midnight.minusDays(daysAgo).withHour(hour).withMinute(minute).toInstant().toEpochMilli()
+        val today = midnight.toInstant().toEpochMilli() + 60_000
+        val long = "I went through the whole schedule again and the load-in moved to the afternoon, so the soundcheck is at 4, " +
+            "doors at 7 and the first act at 8; the north door is the one with the ramp, and parking is behind the loading dock"
+        val lines = listOf(
+            Triple(false, at(400, 12, 5), "That print from last year still hangs in my hall"),
+            Triple(true, at(10, 9, 15), "Booked the room for the 14th"),
+            Triple(false, at(3, 18, 30), "Can you send the poster file?"),
+            Triple(true, at(3, 18, 42), "Sending it tonight"),
+            Triple(false, at(2, 23, 59), "Goodnight!"), // 2 days ago, a minute before midnight: its own chip
+            Triple(false, at(1, 0, 1), "Morning already, ha"), // yesterday, a minute after: another, and its own run
+            Triple(true, at(1, 9, 0), "Morning! Coffee first"),
+            Triple(false, at(1, 9, 2), "Always"),
+            Triple(false, today, "Morning! Did you see the schedule?"),
+            Triple(true, today + 1 * 240_000, "Just now, it looks good"),
+            Triple(false, today + 2 * 240_000, "See https://lowtide.band/annex?day=14, www.example.org. Mail sam@example.com or call +1 555 0100"),
+            Triple(true, today + 3 * 240_000, "Tickets at lowtide.band/annex."),
+            Triple(false, today + 4 * 240_000, "👍"),
+            Triple(true, today + 5 * 240_000, "🎉🎉"),
+            Triple(false, today + 6 * 240_000, long),
+            Triple(true, today + 7 * 240_000, "Which door?"),
+            Triple(false, today + 8 * 240_000, "North one, by the ramp"),
+            Triple(false, today + 9 * 240_000, "I'll be there from 3"),
+            Triple(true, today + 11 * 240_000, "Haha ok"),
+            Triple(true, today + 12 * 240_000, "See you at 8"),
+            Triple(false, today + 13 * 240_000, "Bringing the speaker"),
+            Triple(true, today + 14 * 240_000, "Perfect"),
+        )
+        // Ours, unsent (a tombstone: `unsigned.redacted_because` and no content), after "Which door?".
+        val tombstone = Event("m.room.message", emptyObject, "\$debug-days-unsent", IGAdapter.ME, originServerTS = today + 7 * 240_000 + 60_000,
+            unsigned = Event.Unsigned(redactedBecause = buildJsonObject { put("type", "m.room.redaction") }))
+        return dm("!debug-demo-days", "Ada Lind", ADA, TAMO, request = false, unread = 0, lines, extras = { listOf(tombstone) }).apply {
+            addPending(PendingMessage("debug-failed", buildJsonObject { put("msgtype", "m.text"); put("body", "Running late, save me a seat") },
+                now, PendingMessage.State.Failed("This is the demo: nothing is sent.")))
+        }
+    }
+
+    /**
+     * Ravi Shah (kivostudio, unread): our "Your order ships today" with a 😂 from him, and Instagram's log entry for it
+     * two minutes ago, as the engine makes it. It sorts first, previews its words and has no row in the thread.
+     */
+    private fun ravi(now: Long): Room {
+        val ghost = IGAdapter.user(RAVI)
+        val id = "!debug-demo-ravi"
+        val reaction = Event("m.reaction", buildJsonObject {
+            putJsonObject("m.relates_to") { put("rel_type", "m.annotation"); put("event_id", "\$$id-0"); put("key", "😂") }
+        }, "\$debug-ravi-reaction", ghost, originServerTS = now - 3 * 60_000)
+        val log = Event("m.room.message", buildJsonObject {
+            put("msgtype", "m.notice"); put("body", "Reacted 😂 to your message"); put(MessageKind.REACTION_LOG_KEY, true)
+        }, "\$debug-ravi-log", ghost, originServerTS = now - 2 * 60_000)
+        return dm(id, "Ravi Shah", RAVI, KIVO, request = false, unread = 1,
+            listOf(Triple(true, now - 30 * 60_000, "Your order ships today")), extras = { listOf(reaction, log) })
+    }
+
     /**
      * One group: four senders, runs, a reply, reactions (three people on one emoji), a time gap and two chat events.
      * Unread, with our receipt on Sam's last message; Maya and Sam have seen the newest. No pictures: initials.
+     * `extra` (`--ei group_extra`): that many more unread messages after Theo's last.
      */
-    private fun group(now: Long): Room {
+    private fun group(now: Long, extra: Int): Room {
         val start = now - 60 * 60_000
         val events = mutableListOf(
             state("m.bridge", "instagram", bridge("Saturday Climbs", "340282366841710300949128100000000001", TAMO, request = false, dm = false), start),
@@ -158,7 +277,16 @@ object Demo {
             Event("m.room.message", buildJsonObject { put("msgtype", "m.notice"); put("body", "Sent a poll"); put(MessageKind.UNSUPPORTED_KEY, "a poll") },
                 "\$debug-group-poll", sam, originServerTS = now - 20 * 60_000),
         ))
-        listOf(Triple(4, "❤️", maya), Triple(4, "🔥", theo), Triple(6, "👍", theo), Triple(6, "👍", maya), Triple(6, "👍", IGAdapter.ME))
+        val extraLines = listOf("On my way", "Bringing chalk and the long rope, plus snacks for after", "👍",
+            "Anyone need a ride from the station? Two seats left in the back, leaving at 8:45 sharp")
+        for (i in 0 until extra) {
+            events += text("\$debug-group-extra-$i", listOf(maya, sam, theo)[i % 3], now - 11 * 60_000 + i * 1000L, extraLines[i % extraLines.size])
+        }
+        // Three on Instagram's "❤" (no selector) beside a 😂: the squeezed pill hid the heart behind the faces; our own
+        // short message's pill is wider than the bubble (iOS's DebugFixtures, 2026-10-25).
+        listOf(Triple(2, "❤", theo), Triple(2, "❤", sam), Triple(2, "❤", IGAdapter.ME), Triple(2, "😂", priya), Triple(4, "❤️", maya),
+            Triple(4, "❤️", sam), Triple(4, "❤️", priya), Triple(4, "🔥", theo), Triple(4, "😂", IGAdapter.ME),
+            Triple(6, "👍", theo), Triple(6, "👍", maya), Triple(6, "👍", IGAdapter.ME))
             .forEachIndexed { i, (target, key, sender) ->
                 events += Event("m.reaction", buildJsonObject {
                     putJsonObject("m.relates_to") { put("rel_type", "m.annotation"); put("event_id", "\$debug-group-msg-$target"); put("key", key) }
@@ -170,7 +298,7 @@ object Demo {
             putJsonObject("\$debug-group-msg-6") { putJsonObject("m.read") { put(IGAdapter.ME, read(47.0)) } }
             putJsonObject("\$debug-group-msg-7") { putJsonObject("m.read") { put(maya, read(10.0)); put(sam, read(5.0)) } }
         }
-        return room("!debug-group", events, unread = 1, receipts = Event("m.receipt", receipts))
+        return room("!debug-group", events, unread = 1 + extra, receipts = Event("m.receipt", receipts))
     }
 
     /**

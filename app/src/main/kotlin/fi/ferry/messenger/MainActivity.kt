@@ -36,14 +36,20 @@ class MainActivity : ComponentActivity() {
         // Debug builds: `--ez demo true` shows made-up data only, and nothing connects (`Demo`); `--es request_room <room>`
         // has the engine treat that real chat as a request and hold back its sends (iOS's FERRY_DEBUG_AS_REQUEST).
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska.
+        // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska;
+        // `--ez incoming true` and `--ez reaction true` bring a message and a reaction 10 s in, `--ez busy true` many
+        // new messages in Harbor Coffee, `--ei group_older <n>` has the group page back from five messages (n pages
+        // of 20 made-up ones after its own), `--ei group_extra <n>` adds n unread messages to the group (see `Demo`).
         val demo = debuggable && intent.getBooleanExtra("demo", false)
         AppModel.start(applicationContext, demo, requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable },
             demoSignedOut = demo && intent.getBooleanExtra("signed_out", false),
             // A live account shown signed out (nothing reaches Instagram) until it logs in again: A3's live check.
             signedOut = intent.getStringExtra("signed_out_account")?.takeIf { debuggable && !demo },
             demoIncoming = demo && intent.getBooleanExtra("incoming", false),
-            demoBusy = demo && intent.getBooleanExtra("busy", false))
+            demoBusy = demo && intent.getBooleanExtra("busy", false),
+            demoReaction = demo && intent.getBooleanExtra("reaction", false),
+            demoGroupOlder = if (demo) intent.getIntExtra("group_older", 0) else 0,
+            demoGroupExtra = if (demo) intent.getIntExtra("group_extra", 0) else 0)
         AppModel.openRoom = intent.getStringExtra(OPEN_ROOM)
         if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
         setContent { FerryTheme { App() } }
