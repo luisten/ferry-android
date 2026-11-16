@@ -11,6 +11,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * The thread's fold, one test per rule with its counter-case (the iOS app's TimelineTests). Real fixtures where they
@@ -456,12 +460,56 @@ class TimelineTests {
             message("\$3", 2 * minute, ghost),
             message("\$4", 3 * minute, me),
             message("\$5", 7 * minute, me), // 4 minutes later: a new group
-            message("\$6", 70 * minute, me), // over an hour: a new group with a time
+            message("\$6", 70 * minute, me), // over an hour, same day: no chip
+            message("\$7", 70 * minute + 86_400_000, me), // the next day: a chip
         )
-        val rows = Timeline.layout(Timeline.reduce(events, me))
-        assertEquals(listOf(FIRST, MIDDLE, LAST, SINGLE, SINGLE, SINGLE), rows.map { it.position })
-        assertEquals(listOf(true, false, false, false, false, true), rows.map { it.showsTime })
-        assertEquals(listOf(0, 2, 2, 10, 10, 16), rows.map { it.spacing })
+        val rows = Timeline.layout(Timeline.reduce(events, me), zone = ZoneOffset.UTC)
+        assertEquals(listOf(FIRST, MIDDLE, LAST, SINGLE, SINGLE, SINGLE, SINGLE), rows.map { it.position })
+        assertEquals(listOf(true, false, false, false, false, false, true), rows.map { it.startsDay })
+        assertEquals(listOf(0, 2, 2, 10, 10, 10, 16), rows.map { it.spacing })
+    }
+
+    /** A day chip breaks a run even inside three minutes: 23:59 then 00:01. */
+    @Test fun aDayChipStartsANewRun() {
+        val midnight = 86_400_000L
+        val events = listOf(message("\$1", midnight - 60_000, me), message("\$2", midnight + 60_000, me))
+        val rows = Timeline.layout(Timeline.reduce(events, me), zone = ZoneOffset.UTC)
+        assertEquals(listOf(SINGLE, SINGLE), rows.map { it.position })
+        assertEquals(listOf(true, true), rows.map { it.startsDay })
+    }
+
+    /** TalkBack's label (iOS's `testGroupThreadShowsSendersAndEvents` checks "From Theo Park, …" in its UI test). */
+    @Test fun spokenLabels() {
+        val minute = 60_000L
+        val events = listOf(message("\$1", 0, ghost), message("\$2", minute, ghost), message("\$3", 2 * minute, me))
+        fun rows(group: Boolean) = Timeline.layout(Timeline.reduce(events, me), isGroup = group, zone = ZoneOffset.UTC)
+
+        // A DM: the sender where a run starts (the first row also starts the day), the text alone inside it.
+        val dm = rows(false)
+        assertEquals("From Kivo: hi, 9:41", Timeline.spokenLabel(dm[0], "hi", "9:41", "Tamo", "Kivo"))
+        assertEquals("hi, 9:42", Timeline.spokenLabel(dm[1], "hi", "9:42", "Tamo", "Kivo"))
+        assertEquals("From you, as Tamo: hi, 9:43", Timeline.spokenLabel(dm[2].copy(startsDay = true), "hi", "9:43", "Tamo", "Kivo"))
+        assertEquals("You: hi, 9:43", Timeline.spokenLabel(dm[2].copy(startsDay = false), "hi", "9:43", "Tamo", "Kivo"))
+        assertEquals("From you, as you: hi, 9:43", Timeline.spokenLabel(dm[2].copy(startsDay = true), "hi", "9:43", null, "Kivo"))
+        assertEquals("Kivo: hi, 9:41", Timeline.spokenLabel(dm[0].copy(startsDay = false), "hi", "9:41", "Tamo", "Kivo"))
+
+        // A group: every incoming bubble names its sender, inside a run too; ours as in a DM.
+        val group = rows(true)
+        assertEquals("From Theo Park, hi, 9:41", Timeline.spokenLabel(group[0], "hi", "9:41", "Tamo", "Theo Park"))
+        assertEquals("From Theo Park, hi, 9:42", Timeline.spokenLabel(group[1], "hi", "9:42", "Tamo", "Theo Park"))
+        assertEquals("From you, as Tamo: hi, 9:43", Timeline.spokenLabel(group[2].copy(startsDay = true), "hi", "9:43", "Tamo", "Theo Park"))
+    }
+
+    @Test fun dayLabels() {
+        val now = 1_794_300_000_000L // Tue 10 Nov 2026, 08:40 UTC
+        fun label(daysAgo: Int) = Timeline.dayLabel(now - daysAgo * 86_400_000L, now, ZoneOffset.UTC)
+        assertEquals("Today", label(0))
+        assertEquals("Yesterday", label(1))
+        assertEquals(DateTimeFormatter.ofPattern("EEEE", Locale.ROOT).format(Instant.ofEpochMilli(now - 3 * 86_400_000L).atZone(ZoneOffset.UTC)), label(3))
+        assertFalse(label(8).contains("2026"))
+        assertTrue(label(400).contains("2025"))
+        assertEquals("Tue 3 Nov", label(7)) // a week back is a date, not a weekday
+        assertEquals("Wed 11 Nov", Timeline.dayLabel(now + 86_400_000, now, ZoneOffset.UTC)) // the future is a date too
     }
 
     @Test fun eventsDecodeAsTheEngineAndTheBridgeSendThem() {

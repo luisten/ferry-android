@@ -485,7 +485,7 @@ private fun MessageRow(
     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(top = row.spacing.dp)) {
         if (row.startsUnread) UnreadLine()
-        if (row.showsTime) {
+        if (row.startsDay) { // placeholder until the day chip (R1.5)
             Text(times.label(message.ts), Modifier.fillMaxWidth().padding(bottom = 6.dp), style = MaterialTheme.typography.labelMedium,
                 color = secondary, textAlign = TextAlign.Center)
         }

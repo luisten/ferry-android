@@ -236,6 +236,24 @@ class MediaKindTests {
         assertNull(ShareCaption.of(obj("external_url" to "https://www.instagram.com/stories/")).author)
     }
 
+    /** A text's web links are tappable, sentence punctuation left out; nothing else the detector finds is. */
+    @Test fun linkedText() {
+        val text = "See https://lowtide.band/annex?day=14, www.example.org. Mail sam@example.com or call +1 555 0100"
+        val links = Links.find(text)
+        assertEquals(listOf("https://lowtide.band/annex?day=14", "www.example.org"), links.map { text.substring(it.range) })
+        assertEquals("https://lowtide.band/annex?day=14", links.first().url)
+        assertTrue(links.last().url.endsWith("://www.example.org"))
+        assertTrue(Links.find("No links here.").isEmpty())
+
+        // Android's own: a bare domain with a path, a file name that isn't one, a ")" the link never opened.
+        val bare = "try lowtide.band/annex."
+        assertEquals(listOf(Links.Link(4..21, "https://lowtide.band/annex")), Links.find(bare))
+        assertEquals("lowtide.band/annex", bare.substring(4..21))
+        assertTrue(Links.find("notes.txt").isEmpty())
+        val paren = "(see https://example.org/a_(b))"
+        assertEquals("https://example.org/a_(b)", paren.substring(Links.find(paren).single().range))
+    }
+
     /** The inbox names who made a share when it's known ("Sent a post by @sample.photos"). */
     @Test fun previewSaysWhoMadeTheShare() {
         val room = InboxTests.portal("!p", Fixture.kivoLogin)

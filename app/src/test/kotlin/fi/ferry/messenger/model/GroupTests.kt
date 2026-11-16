@@ -9,6 +9,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.ZoneOffset
 
 /**
  * Group chats (the iOS app's GroupTests): sender labels, who a user is, members. No group exists on the dummy accounts,
@@ -50,13 +51,13 @@ class GroupTests {
         }
     }
 
-    /** Runs break where the layout already breaks them (over 3 minutes, the hour gap), so the name shows again. */
+    /** Runs break where the layout already breaks them (over 3 minutes, a new day under its chip), so the name shows again. */
     @Test fun timeGapsStartANewLabelledRun() {
-        val events = listOf(message("\$1", 0, theo), message("\$2", 4 * minute, theo), message("\$3", 70 * minute, theo))
-        val rows = Timeline.layout(Timeline.reduce(events, me), isGroup = true)
+        val events = listOf(message("\$1", 0, theo), message("\$2", 4 * minute, theo), message("\$3", 70 * minute + 86_400_000, theo))
+        val rows = Timeline.layout(Timeline.reduce(events, me), isGroup = true, zone = ZoneOffset.UTC)
         assertEquals(listOf(SINGLE, SINGLE, SINGLE), rows.map { it.position })
         assertEquals(listOf(true, true, true), rows.map { it.groupSender?.showsName })
-        assertEquals(listOf(true, false, true), rows.map { it.showsTime })
+        assertEquals(listOf(true, false, true), rows.map { it.startsDay })
     }
 
     /** A tombstone ("Theo unsent a message") names its sender already: no labels, still indented. */
