@@ -72,6 +72,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -181,9 +182,17 @@ private val GROUP_INDENT = GROUP_AVATAR + 6.dp
  * T1, one chat (DESIGN §5 T1, §6), locked to the account it belongs to: `Timeline.reduce(room)`, laid out from the
  * bottom so it opens on the newest message and older pages land above without moving it. Read-only until A4.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
+    // Everything the thread saves (the draft, the camera's file, the launchers' pending results, the list's place) is
+    // saved under its room: restored state can only come back to the chat it was typed in, never to the next chat
+    // opened in the same place (R2-F1: a draft from Jonas appeared in Ada's field after the activity was recreated).
+    key(roomID) { ThreadContent(roomID, back, relogin) }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ThreadContent(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     BackHandler(onBack = back)
     val room = AppModel.rooms[roomID]
     if (room == null) {
