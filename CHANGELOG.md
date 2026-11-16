@@ -61,3 +61,4 @@ What changes for people who use the app, in plain words. The format is
   still opens its menu, and with TalkBack each link is one of the message's actions.
 - Reactions hang a little lower, so the message's time stays readable, and a row of reactions wider than a short
   message of yours no longer moves the message out of line.
+- Swipe a message to the right to reply to it.

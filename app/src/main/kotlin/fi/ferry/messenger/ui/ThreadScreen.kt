@@ -7,7 +7,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -17,6 +20,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.DragInteraction
@@ -73,22 +78,32 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
@@ -110,6 +125,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.ferry.messenger.AppModel
@@ -134,6 +150,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -528,10 +547,13 @@ private fun MessageRow(
             words != null -> Timeline.spokenLabel(row, words, clock, identity?.name, people.name(message.sender))
             else -> Timeline.spokenSender(row, identity?.name, people.name(message.sender))
         }
-        val linkActions = Links.find(message.shareText ?: words.orEmpty()).map { link ->
-            CustomAccessibilityAction("Open ${parseURL(link.url)?.host ?: link.url}") { openLink(context, link.url); true }
-        }
-        Column(Modifier.fillMaxWidth(), horizontalAlignment = if (own) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        // iOS 1.7's swipe to reply, where the sheet's Reply is (not in a request, on a tombstone or a send not echoed).
+        val canReply = !actions.readOnly && message.eventID != null && message.kind != MessageKind.Unsent
+        val extraActions = listOfNotNull(CustomAccessibilityAction("Reply") { actions.reply(message); true }.takeIf { canReply }) +
+            Links.find(message.shareText ?: words.orEmpty()).map { link ->
+                CustomAccessibilityAction("Open ${parseURL(link.url)?.host ?: link.url}") { openLink(context, link.url); true }
+            }
+        Column(Modifier.fillMaxWidth().swipeToReply(canReply) { actions.reply(message) }, horizontalAlignment = if (own) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             if (row.groupSender?.showsName == true && message.reply == null) {
                 // Neutral, never coloured: colour means account. The bubble says it to TalkBack.
                 Text(people.name(message.sender), Modifier.padding(start = indent + 12.dp).clearAndSetSemantics {}, style = MaterialTheme.typography.labelMedium,
@@ -553,7 +575,7 @@ private fun MessageRow(
                 }
                 Box(Modifier.fillMaxWidth(0.75f), contentAlignment = if (own) Alignment.BottomEnd else Alignment.BottomStart) {
                     Box(Modifier.padding(bottom = if (message.reactions.isEmpty()) 0.dp else PILL_DROP)) {
-                        MessageMenu(message, actions, label, linkActions) {
+                        MessageMenu(message, actions, label, extraActions) {
                             Bubble(message, row.position, identity, people, clock.takeIf { message.kind != MessageKind.Unsent }) {
                                 if (message.reactions.isNotEmpty()) ReactionPills(message, people, isGroup) { showReactions(message) }
                             }
@@ -578,6 +600,79 @@ private fun MessageRow(
             }
         }
     }
+}
+
+/** How far a message is swiped before letting go replies to it (iOS 1.7). */
+private val REPLY_THRESHOLD = 60.dp
+
+/**
+ * iOS 1.7's swipe to reply, toward the end (right; left in RTL, decision D3): the message follows the finger, past
+ * 60 dp at a third of its pace, with the reply arrow fading in from the start side and growing once letting go would
+ * reply (a tick there). It springs back either way. Decision A14: it's a swipe only once the finger has moved a touch
+ * slop along one axis, mostly toward the end (twice as far across as down); until then it watches after the bubble's
+ * own handlers and before the list (the Main pass, inner first), so the voice bars' seek and the list's scroll take
+ * what's theirs, and a hold that opened the sheet stays a hold. Once it's a swipe it takes the moves first (the Initial
+ * pass), which cancels the bubble's tap and hold. Measured on this unmoving node, the row moving under it.
+ */
+@Composable
+private fun Modifier.swipeToReply(enabled: Boolean, reply: () -> Unit): Modifier {
+    if (!enabled) return this
+    val offset = remember { Animatable(0f) }
+    val grown = remember { Animatable(0.7f) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val dir = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1f else -1f
+    val threshold = with(LocalDensity.current) { REPLY_THRESHOLD.toPx() }
+    val arrow = rememberVectorPainter(Icons.reply)
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    val replying by rememberUpdatedState(reply)
+    LaunchedEffect(threshold) {
+        snapshotFlow { offset.value >= threshold }.collectLatest { past ->
+            if (past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+            grown.animateTo(if (past) 1f else 0.7f, tween(150))
+        }
+    }
+    return pointerInput(dir, threshold) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false) // the bubble's tap handlers take the down
+            var moved = Offset.Zero
+            var claimed = false
+            try {
+                while (true) {
+                    val change = awaitPointerEvent(if (claimed) PointerEventPass.Initial else PointerEventPass.Main)
+                        .changes.firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) {
+                        if (claimed && offset.value >= threshold) replying()
+                        break
+                    }
+                    if (!claimed) {
+                        if (change.isConsumed || change.uptimeMillis - down.uptimeMillis > viewConfiguration.longPressTimeoutMillis) break
+                        moved += change.positionChange()
+                        if (max(abs(moved.x), abs(moved.y)) < viewConfiguration.touchSlop) continue
+                        if (dir * moved.x > 0 && abs(moved.x) > 2 * abs(moved.y)) claimed = true else break
+                    }
+                    change.consume()
+                    val x = max(0f, dir * (change.position.x - down.position.x))
+                    scope.launch { offset.snapTo(if (x <= threshold) x else threshold + (x - threshold) / 3) }
+                }
+            } finally {
+                if (claimed) scope.launch { if (animationsOff(context)) offset.snapTo(0f) else offset.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+            }
+        }
+    }.drawWithContent {
+        drawContent()
+        val o = offset.value
+        if (o <= 0f) return@drawWithContent
+        // The arrow at the start side, 40 dp behind the message's edge (iOS's offset ± 40), clear by the threshold.
+        val side = 24.dp.toPx()
+        val x = (o - 40.dp.toPx()).let { if (dir > 0) it else size.width - it - side }
+        translate(x, (size.height - side) / 2) {
+            scale(grown.value, Offset(side / 2, side / 2)) {
+                with(arrow) { draw(Size(side, side), alpha = min(1f, o / threshold), colorFilter = ColorFilter.tint(tint)) }
+            }
+        }
+    }.graphicsLayer { translationX = dir * offset.value }
 }
 
 /**

@@ -211,7 +211,8 @@ private fun fit(w: Double?, h: Double?, maxW: Float, maxH: Float): Pair<Dp, Dp> 
     return (w * scale).toFloat().dp to (h * scale).toFloat().dp
 }
 
-private fun animationsOff(context: android.content.Context) =
+/** Android's "Remove animations" (iOS's Reduce Motion). */
+internal fun animationsOff(context: android.content.Context) =
     Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
 
 /** GIFs that have played their three times this launch: they rest on their first frame. */
