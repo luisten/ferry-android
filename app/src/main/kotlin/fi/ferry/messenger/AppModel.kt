@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.setValue
@@ -87,8 +88,16 @@ object AppModel {
     const val ME = IGAdapter.ME
 
     private val roomsState = mutableStateOf(mutableMapOf<String, Room>(), neverEqualPolicy())
-    /** The chats by room ID. A change inside a room notifies too (the map is re-sent after each batch of updates). */
+    /**
+     * The chats by room ID. A change inside a room notifies too: the map is re-sent after each batch of updates, and
+     * each room's own `Room.Version` is snapshot state, so a composable handed the same Room (an inbox row, the
+     * thread's header, Chat Info), which Compose would skip, is recomposed when that room changes.
+     */
     val rooms: Map<String, Room> get() = roomsState.value
+
+    init {
+        Room.Version.make = { object : Room.Version() { override var count by mutableIntStateOf(0) } }
+    }
 
     /** Accounts in the user's order (scope bar, stack). */
     val orderedAccounts: List<BridgeAPI.Login>

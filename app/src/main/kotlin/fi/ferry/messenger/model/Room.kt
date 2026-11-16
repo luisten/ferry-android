@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonElement
  * Not thread-safe: one thread owns it.
  */
 class Room(val id: String) {
+    private val version = Version.make()
     private val _state = mutableMapOf<String, MutableMap<String, Event>>()
     private val _events = mutableListOf<Event>()
     private val _receipts = mutableMapOf<String, Receipt>()
@@ -16,32 +17,59 @@ class Room(val id: String) {
     private val _related = mutableMapOf<String, Event>()
 
     /** Current state, `type → state_key → event`, from `state` and from state events inside the timeline. */
-    val state: Map<String, Map<String, Event>> get() = _state
+    val state: Map<String, Map<String, Event>> get() = seen(_state)
     /** Timeline events in order, oldest first, since the last `limited` reset. */
-    val events: List<Event> get() = _events
+    val events: List<Event> get() = seen(_events)
     /** Where the window starts, for `IGOlder` (`IGAdapter.START_TOKEN` when there's nothing older). */
-    var prevBatch: String? = null; private set
-    var notificationCount = 0; private set
-    var highlightCount = 0; private set
+    var prevBatch: String? = null; get() = seen(field); private set
+    var notificationCount = 0; get() = seen(field); private set
+    var highlightCount = 0; get() = seen(field); private set
     /** Who's typing right now (each `m.typing` replaces the list). */
-    var typing: List<String> = emptyList(); private set
+    var typing: List<String> = emptyList(); get() = seen(field); private set
     /** Each user's latest `m.read`; ours (`IGAdapter.ME`) is our watermark. */
-    val receipts: Map<String, Receipt> get() = _receipts
+    val receipts: Map<String, Receipt> get() = seen(_receipts)
     /** Sends not echoed yet (local echo). */
-    val pending: List<PendingMessage> get() = _pending
+    val pending: List<PendingMessage> get() = seen(_pending)
     /** Reply targets from outside the window, by event ID. */
-    val related: Map<String, Event> get() = _related
+    val related: Map<String, Event> get() = seen(_related)
     /** The window reached the chat's first message. */
-    var reachedStart = false; private set
+    var reachedStart = false; get() = seen(field); private set
 
     /** This device's archive: `Inbox.ARCHIVED_TAG` → when (Instagram isn't told). */
     var tags: Map<String, JsonElement> = emptyMap()
+        get() = seen(field)
+        set(value) { field = value; changed() }
     /** Accept or Delete on a request, from the tap until the engine answers (optimistic). */
     var requestAction: RequestAction? = null
+        get() = seen(field)
+        set(value) { field = value; changed() }
     /** Us in this chat (`IGAdapter.ME`), to tell the DM's contact apart from us among the members. */
     var ownUserID: String? = null
 
     data class Receipt(val eventID: String, val ts: Long)
+
+    /**
+     * A room's change count, for the screens (Android's own: the iOS app's Room is `@Observable`). Every accessor
+     * reads it and every change bumps it. Compose skips a composable handed the same Room again (strong skipping
+     * compares it by identity), so the app makes it snapshot state (`AppModel`) and a screen that read the room is
+     * recomposed when it changes, the inbox's rows too; the model and its tests keep a plain count.
+     */
+    open class Version {
+        open var count = 0
+
+        companion object {
+            var make: () -> Version = ::Version
+        }
+    }
+
+    /** How many changes the room has had: reading it, as every accessor does, observes the room. */
+    val changes: Int get() = version.count
+
+    private fun <T> seen(value: T): T = value.also { version.count }
+
+    private fun changed() {
+        version.count++
+    }
 
     enum class RequestAction { ACCEPT, DELETE }
 
@@ -74,6 +102,7 @@ class Room(val id: String) {
         }
         // The engine re-sent the chat without the request flag: the accept is done.
         if (requestAction == RequestAction.ACCEPT && bridge?.isRequest != true) requestAction = null
+        changed()
     }
 
     private fun setState(event: Event) {
@@ -98,23 +127,28 @@ class Room(val id: String) {
         _events.addAll(0, older)
         prevBatch = page.end
         reachedStart = page.end == null || page.chunk.isEmpty()
+        changed()
     }
 
     fun addPending(message: PendingMessage) {
         _pending += message
+        changed()
     }
 
     fun updatePending(txnID: String, state: PendingMessage.State) {
         val i = _pending.indexOfFirst { it.txnID == txnID }
         if (i >= 0) _pending[i] = _pending[i].copy(state = state) // else the echo came first
+        changed()
     }
 
     fun removePending(txnID: String) {
         _pending.removeAll { it.txnID == txnID }
+        changed()
     }
 
     fun addRelated(event: Event) {
         event.eventID?.let { _related[it] = event }
+        changed()
     }
 
     private fun mergeReceipts(content: JsonElement) {
@@ -128,11 +162,11 @@ class Room(val id: String) {
 
     // Derived (pure)
 
-    fun stateEvent(type: String, key: String = ""): Event? = _state[type]?.get(key)
+    fun stateEvent(type: String, key: String = ""): Event? = state[type]?.get(key)
 
     /** The engine's `m.bridge`: whose chat it is, with whom, and where it goes. */
     val bridge: BridgeInfo?
-        get() = _state["m.bridge"]?.entries?.sortedBy { it.key }?.firstNotNullOfOrNull { BridgeInfo.parse(it.value.content) }
+        get() = state["m.bridge"]?.entries?.sortedBy { it.key }?.firstNotNullOfOrNull { BridgeInfo.parse(it.value.content) }
 
     val name: String
         get() = stateEvent("m.room.name")?.content?.get("name").string?.takeIf { it.isNotEmpty() }
@@ -162,16 +196,17 @@ class Room(val id: String) {
     val lastMessage: Event? get() = lastMessage { true }
 
     fun lastMessage(predicate: (Event) -> Boolean): Event? {
-        val redacted = _events.mapNotNullTo(HashSet()) { it.redactionTarget }
-        return _events.lastOrNull { it.isBaseMessage && !it.isPreRedacted && (it.eventID ?: "") !in redacted && predicate(it) }
+        val events = events
+        val redacted = events.mapNotNullTo(HashSet()) { it.redactionTarget }
+        return events.lastOrNull { it.isBaseMessage && !it.isPreRedacted && (it.eventID ?: "") !in redacted && predicate(it) }
     }
 
     /** The inbox's order: the last message's time. State events are stamped when the engine made them. */
-    val lastActivity: Long get() = lastMessage?.originServerTS ?: _events.lastOrNull()?.originServerTS ?: 0
+    val lastActivity: Long get() = lastMessage?.originServerTS ?: events.lastOrNull()?.originServerTS ?: 0
 
     /** What a message shows: its latest edit's `m.new_content` (same sender only), else its own content. */
     fun currentContent(of: Event): JsonElement =
-        _events.lastOrNull { it.replacesEventID == of.eventID && it.sender == of.sender }?.content?.get("m.new_content") ?: of.content
+        events.lastOrNull { it.replacesEventID == of.eventID && it.sender == of.sender }?.content?.get("m.new_content") ?: of.content
 
     companion object {
         /** "ig_123" for "@ig_123", "instagram_123" for "@instagram_123:server". */
