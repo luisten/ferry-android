@@ -2,11 +2,11 @@
 # Builds the engine (github.com/luisten/ferry-messenger/core at the commit pinned in go.mod, or the local checkout a
 # gitignored go.work names) as app/build/engine/jniLibs/arm64-v8a/libigcore.so, with its JNI bridge
 # (core/cmd/igcore/jni_android.c). Gradle runs this before every build; Go's cache makes an unchanged engine quick.
-# Needs Go 1.27.1 on PATH and the Android NDK r30 (30.0.16248370) in ANDROID_NDK_HOME or the default SDK folder.
+# Needs Go 1.27.3 on PATH and the Android NDK r30 (30.0.16248370) in ANDROID_NDK_HOME or the default SDK folder.
 set -eu
 cd "$(dirname "$0")"
 
-want=go1.27.1
+want=go1.27.3
 have=$(go env GOVERSION)
 [ "$have" = "$want" ] || { echo "build-engine.sh: need $want on PATH, found $have" >&2; exit 1; }
 ndk=${ANDROID_NDK_HOME:-$HOME/Library/Android/sdk/ndk/30.0.16248370}
