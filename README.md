@@ -3,9 +3,14 @@
 Your Instagram messages in a calm app of their own: the chats, without the feed. This is the Android version of
 [Ferry Messenger](https://github.com/luisten/ferry-messenger) for iPhone.
 
-**Not ready yet.** Today it logs in, shows your inbox (your chats from every account, requests and folders) and lets
-you read and answer your chats, message requests included, start new ones, and send and see photos, videos and voice
-messages, with notifications. There's no download to install; this page will say when there is.
+**Version 1.7, a test version for friends.** It matches the iPhone app's 1.7: your chats from every account in one inbox,
+requests and folders; reading and answering with replies, reactions, edits, photos, videos, voice messages and links;
+swiping a message to reply; marking a chat as unread; sending several photos and videos at once or taking one with
+the camera; new messages as notifications. [CHANGELOG.md](CHANGELOG.md) lists it all.
+
+**Getting it:** there's no app store. The person who invited you sends you the `.apk` file, and
+[docs/INSTALL.md](docs/INSTALL.md) shows how to install it. You need an Android 8.0 or newer phone with a 64-bit ARM
+processor (nearly every phone of the last years).
 
 ## How it works
 

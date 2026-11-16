@@ -7,7 +7,13 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** iOS 1.5.1 (2026-10-23): the 0.3 s hold, holding any card (an opened set's too), and the link preview's
+**Status:** iOS 1.7 parity (2026-11-17, branch `ios-1.7-parity`, version 1.7, code 17; the decisions A12–A56 and the
+known limitations are in [docs/DECISIONS.md](docs/DECISIONS.md)): the time in every bubble, day chips and the floating
+day, links, reaction pills, TalkBack's one label per bubble, swipe to reply (toward the end), mark as unread, up to 10
+photos and videos on a per-chat send line, paste and keyboard images, the camera from +, rotation and dark mode keeping
+the open chat, the engine at iOS 1.7 (reaction log entries, camera media). Checked on the demo and the headless emulator
+by two independent testers (a fix round after each); nothing of it was checked live (no Instagram action was made),
+nor with TalkBack, haptics or on a real phone: the list is in DECISIONS.md. iOS 1.5.1 (2026-10-23): the 0.3 s hold, holding any card (an opened set's too), and the link preview's
 picture and tap, the last a gap from before; checked on the demo. iOS 1.1–1.2's last gaps (2026-10-22): Chat Info (`ui/ChatInfo.kt`) and the person card, Share in the
 photo viewer and Share All, swipe to archive, pull to refresh, drag to reorder accounts; checked on the demo. With it
 Android has all of iOS 1.0–1.5. iOS 1.5 parity (2026-10-22): the iOS logo and launch screen; a chat that opens unread holds its "New
@@ -30,41 +36,69 @@ inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card
 rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
 applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. A signed APK and the friends' install guide come with A9. The engine is pinned at a2a0c44 (the iOS repo's main after PR #10: GIPHY stickers and GIFs, our watermark with an unread mailbox copy, removals of reactions loaded with the thread). The README is for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
+JNI bridge, the login. A9 (2026-11-17): the signed release APK (`assembleRelease`, the key from Gradle properties: Commands) and the friends'
+install guide, [docs/INSTALL.md](docs/INSTALL.md), which carries the signing certificate's fingerprint; its install on a
+real phone is still to be seen. The engine is pinned at 70aa388 (The engine). The README and the install guide are for
+users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
 ## Commands
 
 ```sh
-export JAVA_HOME=~/Library/Android/jdk/jdk-21.0.12.1+1/Contents/Home ANDROID_HOME=~/Library/Android/sdk PATH=~/sdk/go1.27.1/bin:$PATH
+. docs/local/env.sh        # gitignored; sets JAVA_HOME (~/Library/Android/jdk/jdk-21.0.13+9/Contents/Home), ANDROID_HOME (~/Library/Android/sdk)
+                           # and PATH (Homebrew's Go 1.27.3 in /opt/homebrew/bin, the JDK, platform-tools, emulator)
 ./gradlew assembleDebug                         # runs build-engine.sh (libigcore.so, arm64-v8a), then the APK
-./gradlew testDebugUnitTest                     # the model's tests, on the JVM, ~5 s (results: app/build/test-results)
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-~/Library/Android/sdk/emulator/emulator -avd igcore_ps16k -no-snapshot -gpu host   # with a window: logins need one
+./gradlew testDebugUnitTest                     # the model's tests, on the JVM, 208, ~5 s (results: app/build/test-results)
+./gradlew assembleRelease                       # app/build/outputs/apk/release/app-release.apk; lintVitalRelease runs with it
+B=$ANDROID_HOME/build-tools/36.0.0; A=app/build/outputs/apk/release/app-release.apk
+$B/apksigner verify --print-certs $A            # one signer, CN=Ferry Messenger; its SHA-256 is the one in docs/INSTALL.md
+$B/zipalign -c -P 16 -v 4 $A                    # 16 KB alignment, libigcore.so stored
+$B/aapt2 dump badging $A                        # versionName/Code, minSdk 26, arm64-v8a only; no "debuggable" in the manifest
+./gradlew --stop                                # before the emulator: an 8 GB Mac can't hold Gradle and the emulator together
+nohup emulator -avd igcore_ps16k -no-window -no-audio -no-snapshot -memory 3072 -gpu host -crash-report-mode never -no-metrics >/dev/null 2>&1 &
+adb wait-for-device shell 'while [ "$(getprop sys.boot_completed)" != 1 ]; do sleep 2; done'   # ~40 s; then `adb shell pidof fi.ferry.messenger` prints nothing
+adb install -r app/build/outputs/apk/debug/app-debug.apk && adb shell sync
+adb shell am start -n fi.ferry.messenger/.MainActivity --ez demo true   # debug: made-up data, nothing connects (switches: Invariants)
+adb exec-out screencap -p > docs/local/<name>.png
 adb logcat -s ferry                             # C6 counts: logged each time the app leaves the screen (HOME)
-adb shell am start -n fi.ferry.messenger/.MainActivity --ez demo true   # debug: made-up data, nothing connects
+adb shell am force-stop fi.ferry.messenger; adb emu kill
 ./gradlew --write-verification-metadata sha256 help assembleDebug   # after a dependency change; review the diff
 git ls-files | xargs grep -nE '"sessionid"\s*:\s*"[^"]{12,}|/Users/[a-z]'   # secret and home-path scan: expect nothing
 ```
+
+The emulator is headless here; a login needs a window (drop `-no-window`, and `-no-audio` unless the microphone is
+tried). **Release signing:** `app/build.gradle.kts` reads the key's four details from the Gradle properties
+`FERRY_RELEASE_STORE_FILE`, `_STORE_PASSWORD`, `_KEY_ALIAS` and `_KEY_PASSWORD` in `~/.gradle/gradle.properties` (decision
+A55); without them `assembleRelease` makes an unsigned APK, and debug builds don't care. Never print, copy or log those
+values or put a keystore in the repo (`.gitignore` guards `*.jks`, `*.keystore`, `keystore.properties`). A release APK
+and a debug one have different signatures: uninstall one to install the other (that signs the app out). No
+minification or resource shrinking: the JNI bridge names `fi.ferry.core.IGCore`. The version is `versionCode` +1 per
+release, never down (A25).
 
 Every launch with a stored account is an Instagram action (IGResume: index, mailbox, folder pages, socket). Read
 the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunching.
 
 ## The engine
 
-- **Pinned in `go.mod`** as `github.com/luisten/ferry-messenger/core` at a commit (pseudo-version; no tags until
-  the API settles, tags are the user's), its `cmd/igcore` named by a `tool` line so `go mod tidy` keeps it. Bump:
-  `go get -tool github.com/luisten/ferry-messenger/core/cmd/igcore@<commit>` and `go mod tidy`, then check that
+- **Pinned in `go.mod`** as `github.com/luisten/ferry-messenger/core` at a commit (pseudo-version; now `70aa388`, the
+  iOS repo's v1.7), its `cmd/igcore` named by a `tool` line so `go mod tidy` keeps it. Bump:
+  `GOTOOLCHAIN=local go get -tool github.com/luisten/ferry-messenger/core/cmd/igcore@<commit>` and `GOTOOLCHAIN=local go mod tidy`
+  (`build-engine.sh` checks the Go version the same way; a plain `go` command may download a newer toolchain), then check that
   `go.mod`'s `replace` still matches core's own (Go doesn't carry a dependency's `replace` over: without it the build
   silently uses upstream `imroc/req`, not Beeper's fork) and that `go.sum` is core's `go.sum` plus the engine's own
   two lines (`sort go.sum | comm -23 - <(git -C <iOS repo> show <commit>:core/go.sum | sort)`).
 - **The JNI bridge is `core/cmd/igcore/jni_android.c` in the iOS repo** (decision E6), beside the C API it wraps;
   cgo compiles it only for Android. Its symbols name `fi.ferry.core.IGCore` ([IGCore.kt](app/src/main/kotlin/fi/ferry/core/IGCore.kt)):
   moving that class or package breaks the bridge. Strings cross as UTF-8 `ByteArray`s, never `jstring` (emoji).
+- **Moving the pin:** read the iOS repo's `docs/PLAN-android.md` §7b ("Engine changes the Android app must follow")
+  first, for every entry newer than the pinned commit: some engine changes need Kotlin changes in the same step (the
+  first: reaction log entries, `fi.ferry.reactionLog`, which `Timeline.reduce` must drop or they show as bubbles: done, `MessageKind.REACTION_LOG_KEY`, and the filter stays before the `isRedacted` branch).
 - **Changing the bridge or the engine:** a branch in a git worktree of the iOS repo (never its main checkout), and a
   gitignored `go.work` here that uses it (`go work init . <path to that worktree>/core`). `build-engine.sh` then
   builds the worktree's engine. Once the user merges it there, pin that commit and delete `go.work`.
-- The library is ~17.8 MB, stored uncompressed and 16 KB-aligned in the APK (Android 15+ phones need the alignment;
+- `IGCore.pause()`/`unpause()` (`IGPause`/`IGUnpause`) are declared and never called: E8 keeps the sockets open. `IGStop`
+  marks an account removed (Remove Account and a refused re-login are its two callers, as intended).
+- The library is ~17.9 MB (17,861,624 bytes at 70aa388), stored uncompressed and 16 KB-aligned in the APK (Android 15+ phones need the alignment;
   NDK r30 does it). arm64-v8a only (`abiFilters`).
 
 ## Invariants
@@ -87,7 +121,13 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   "RELEASED" (and force-stop the app, `adb shell am force-stop fi.ferry.messenger`: since A8 its service stays
   connected in the background). Answer theirs the same way.
 - **Check screens on the demo first** (`--ez demo true`, `Demo.kt`, debug builds only): the iOS app's made-up accounts,
-  chats, requests and group; the engine isn't even loaded, so it costs no Instagram action.
+  chats, requests and group; the engine isn't even loaded, so it costs no Instagram action. Switches (with `--ez demo true`;
+  `DemoTests` pins what each shows): `incoming` (Noor, 10 s in), `busy` (Harbor Coffee opens unread), `reaction` (a 😮
+  reaction and its log entry in Jonas Berg's chat, 10 s in), `clipboard` (two made-up JPEGs on the clipboard), `--ei
+  group_older n` (the group pages in from its newest five, then n pages of 20), `--ei group_extra n` (n more unread in
+  the group), `signed_out`, `naming`. Always there: Ada Lind (days, links, emoji, a tombstone, a failed message),
+  Ravi Shah (a reaction log entry), Elena's photo without a URL. The demo's `markRead` does nothing and its sends fail
+  after 0.6 s (through the send line, so the order shows).
 - **Live checks use the two dummies only** (stand-ins `tamoveska` personal, `kivostudio` professional; real names only
   in the iOS repo's gitignored `docs/local/test-accounts.md`). Every login, launch, send and "Seen" is an Instagram
   action: count them (C6) and report them.
@@ -108,14 +148,17 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   doc comments) so a fix on one side ports to the other: change both, and port the tests with it. It models what
   the engine sends (core/chat) and nothing of Ferry's bridge: no send statuses ("delivered"), no bridge bot, no
   `xma_fetch_status` failures, no personal spaces, room summary, server-side `m.tag` or implicit DM names. Pure: no
-  `android.*`, so the tests run on the JVM. Glyphs are `Glyph` values; the screens pick the Material Symbol.
+  `android.*`, so the tests run on the JVM (`Links.find` is a pattern for that reason: `android.util.Patterns` is a stub).
+  Glyphs are `Glyph` values; the screens pick the Material Symbol.
 - **Fixtures** (`app/src/test/resources/fixtures`) are copied unchanged from the iOS repo at the pinned commit, and
   `engine_*.json` are the engine's own output: when the pin moves and core/chat's output changed, copy them again
   (their README). Tests say where a bridge-era fixture's extras (its bot, its spaces) changed what they assert.
 - `compileSdk` 37 because Compose 1.12 requires it; `targetSdk` 36 decides behaviour (the emulator is API 36).
 - Engine calls are blocking and can wait on the network: never on the main thread. `IGNextEvent` is polled on its own
-  thread; everything the screens read changes on the main thread only (`AppModel`). Rooms are plain mutable objects:
-  reading `AppModel.rooms` subscribes a screen, and the map is re-sent after each batch of updates.
+  thread; everything the screens read changes on the main thread only (`AppModel`). Rooms are mutable objects, observable
+  through `Room.Version` (A39): snapshot state that every accessor reads and every change bumps, so a new accessor or
+  mutator goes through `seen(...)` / `changed()`. Without it Compose's strong skipping (not switchable off since Kotlin 2.4)
+  skips a row handed the same mutated Room and the inbox keeps stale words. The map is re-sent after each batch of updates.
 - **Opening a chat** calls `IGOpenChat` (a read, at most every 30 s, the engine decides) and `IGMarkRead` on open and
   on each new message while it shows: the engine sends "Seen" only when the chat is unread and isn't a request. The
   thread's list is laid out from the bottom (`reverseLayout`), so it opens on the newest message and older pages land
@@ -125,6 +168,14 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   Delete. React, edit and unsend wait for the echo instead; a failure shows as a notice. The menu (long press) offers
   only what the engine allows: no reactions, edits or unsends in a request, Edit only within `Timeline.canEdit`.
   Typing goes to the engine as it starts and stops; the engine throttles it and never sends it in a request.
+  **Every send of a chat (text, photo, video, voice, retry) goes through `AppModel.enqueue` onto its `SendQueue`** (A12, one
+  serial thread per chat, idle ones go after 30 s; a job reports its own failure and one that throws never blocks the
+  next); react, edit, unsend and typing stay off it. Up to 10 photos and videos wait above the field as `ComposerItem`s
+  (`MAX_ATTACHMENTS`; deleted with the thread, A48) and go in the order picked, then the text. `Outgoing.prepare(context,
+  uri, wanted, copy, done)`: photos on one single-thread executor (A13), videos through a main-thread FIFO and one
+  Transformer at a time; `done` is called exactly once (`Failure("Removed.")` if `wanted()` was false at its turn). A paste or
+  the keyboard's image (`copy = true`) is copied into `cache/outgoing/in-*` at once on its own thread, then prepared from
+  the copy (A23, A46); only `content:` URIs whose provider type is `image/*`/`video/*` are taken.
 - **A request** shows `RequestBar` instead of the composer (`Inbox.threadBar`). Accept and Delete are optimistic
   (`Room.requestAction`: the chat moves or hides at once) and undone with a notice if the engine refuses; a Delete's
   room then goes with the engine's `RoomRemoved`. "Reply instead" sends through the engine, which accepts first.
@@ -142,7 +193,7 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   in the demo) holds the process, and so the engine's connections, with a silent "Connected" notification. A live
   update's new messages from others notify (`Notifier.messages`, DESIGN §3.3: title the contact, "to Studio", the
   account's colour); not a history page, the first sync, messages from before the process, requests or General
-  (DESIGN §4.5), or the chat on screen. Text is marked private (Android's sensitive-notification setting decides the
+  (DESIGN §4.5), or the chat on screen, or a reaction log entry (D2: it makes the chat unread and moves it up, silently). Text is marked private (Android's sensitive-notification setting decides the
   lock screen). Opening or reading the chat clears it. O7 asks once (Android 13+); Accounts offers the battery
   exemption. A signed-out account notifies when Ferry isn't on screen. Demo: `--ez incoming true` (Noor, 10 s in).
 - **iOS parity is UI too** (the user, 2026-10-22): the same logo, layout and copy as the iOS app, in Material.
@@ -152,11 +203,33 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **Opening a thread** (iOS 1.5): unread, it holds the "New messages" line under the last message read unless what's
   new reaches less than a quarter screen past it; hidden until placed (1 s at most). The list is reversed, so the
   placement measures offsets after `scrollToItem` (a chat's start clamps it). A touch, the jump button or a send
-  lets go. Only a send from this phone follows the end (`Message.isLocalEcho`). Demo: `--ez busy true`.
+  lets go. Only a send from this phone follows the end (`Message.isLocalEcho`). Placement is keyed on the line's row and
+  whether the row above it is loaded (`lineAnchor`), so a page that brings the last message read places it again, and
+  the open doesn't let go while the first row loaded is unread and the start isn't here (A36).
+- **The thread's read side** (iOS 1.7): `Row.startsDay` gives a day chip (`DayChip`, a heading) to the first row and
+  each new day, which also breaks a run; `Timeline.layout(..., zone)`, `Timeline.dayLabel`. The time is in every bubble
+  (`TextBubble`: a clear copy in the text, the shown one over it; `CardTime` on cards; a card's bottom end is the
+  time's, so a video's length is bottom start), in the phone's 12/24-hour setting. `FloatingDay` is the only reader of
+  `list.layoutInfo`, in a `derivedStateOf`. Reaction pills are a custom `Layout` (`PillLayout`, A26). TalkBack gets one
+  label per bubble (`MessageMenu(label, extraActions)`, `Timeline.spokenLabel`, `spokenSender`). **Links** (A19, A30, A34):
+  `LinkedText` takes its own touches with `detectTapGestures` (a tap on a link opens it, else the bubble's tap; hold and
+  double tap go on through `TapTarget`), and finds the link by the letter's box, not `getOffsetForPosition`.
 - **The long press opens a sheet** (iOS 1.5; 0.3 s since iOS 1.5.1, `quickHold` in the thread's list, Android's own
   0.4 s elsewhere; a longer delay chosen in accessibility settings stays): the message named in one line, `RecentReactions` (tested; stored in
   SharedPreferences, recorded when adding) and "+" (a field for the keyboard's emoji, `isEmoji`), then Reply, Copy,
   Edit, Share All (photos and videos sent together), Open in Instagram, Unsend/Delete, each run once the sheet is gone.
+- **Swipe to reply** (`swipeToReply` in `ui/ThreadScreen.kt`, D3, A14, A44) works on a row's message part, toward the end
+  (right in LTR, mirrored in RTL; iOS swipes left), only where the sheet's Reply is (not in a request, on a tombstone or
+  a send not echoed): 60 dp, a third of the pace past it, a haptic there, a spring back (a snap with animations off). The
+  arbitration is by pass order: a parent sees the Main pass after its children and the Initial pass before them, so it
+  watches in Main until it decides (a child that took the move has consumed it), then consumes in Initial, which cancels
+  the children's tap and long press; the list's scroll is an ancestor, so a drag the row lets go of is the list's. A touch
+  held past the long press before it moves stays a hold. TalkBack has a "Reply" action.
+- **Mark as unread** (iOS 1.7, A20, A45, this phone only): `Inbox.MARKED_UNREAD_TAG`, `Room.isMarkedUnread`, which
+  `isUnread` includes (the dot, every count, the chips); `AppModel.setMarkedUnread` keeps it in SharedPreferences
+  (`markedUnread`), put back on every update like the archive; only `markRead` clears it (a newer message doesn't).
+  `Notifier.clear` in `apply` goes by Instagram's counts (A29). A row swiped right or in the long-press menu, in General
+  and Archived too, never on a request or an Instagram-unread chat.
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
   SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told. A row
   swiped left (`SwipeToDismissBox`, its grey only as wide as the swipe) or long-pressed archives or unarchives it.
@@ -164,8 +237,22 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   its "Seen"), opened from the header capsule or ⋯. The person card (`PersonCard`) shows only what the thread brought:
   nothing is asked of Instagram. Pull to refresh (inbox) and opening Accounts call `AppModel.restartSync`: an account
   whose connect failed connects again (an IGResume each); connected and signed-out ones cost nothing.
-- **Share** goes through `FileProvider` (`${applicationId}.files`), which lends only `cache/media` and
-  `cache/outgoing` (`res/xml/shared_files.xml`), read-only, to the app the user picks.
+- **Share and the camera** go through `FileProvider` (`${applicationId}.files`), which lends only `cache/media`,
+  `cache/outgoing` and `cache/camera` (`res/xml/shared_files.xml`): read-only to the app the user picks, and the camera
+  app gets write on the one URI it's given. **The camera is the system's** (D4, A21): `+` is a `DropdownMenu` with Take
+  Photo, Record Video and Choose from Library (the picker at once without `FEATURE_CAMERA_ANY`); `TakePicture` /
+  `CaptureVideo` write `cache/camera/camera-<uuid>.jpg|mp4`, deleted once prepared or on cancel, and the launch sweep
+  clears the folder. No CAMERA permission and none to add (the merged manifest is checked).
+- **The composer is a `TextFieldState`** (`rememberSaveable(roomID, saver = TextFieldState.Saver)`), with the paste
+  receiver (`Modifier.pastes`, `contentReceiver`) always on (A53: added only with "+", the keyboard kept "no images" after
+  an Edit). Only `Composer` reads `draft.text` (`composing` is a `derivedStateOf`); Edit is `setTextAndPlaceCursorAtEnd`.
+  Leaving a chat drops its draft (A52, as iOS).
+- **The thread's saved state is keyed by its room** (A50): `ThreadScreen` wraps its whole content in `key(roomID)`.
+  `rememberSaveable(roomID, …)` alone only resets the value, so after a recreation the next chat opened would get the
+  last chat's draft. A new screen reused for different rooms or accounts at one call site needs the same `key(...)`.
+  `MainActivity` handles `orientation|screenSize|…|uiMode|…|fontScale` itself (A51), so rotation, dark mode and font size
+  keep the chat; `onConfigurationChanged` calls `enableEdgeToEdge()` again. A language change or process death still
+  recreates it and returns to the inbox (the screen stack isn't saved).
 - **New Message** searches as the chosen account (`IGSearch`, an Instagram request each: 300 ms after typing stops,
   2 letters or more) and opens with `IGOpenDM`: our DM, else Instagram's (read once), else a draft until the first
   message. Its answer's `seq` says when the room is in (`AppModel.seqWaiters`).
@@ -203,7 +290,9 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **Hand-installed SDK packages** (zips from dl.google.com, checksummed; there are no cmdline-tools here): AGP writes a
   `package.xml` for a plain folder, but not for Platform 37.0 (its minor version), and then asks to install it and
   fails on licences. Write the `package.xml` from `platforms/android-36`'s with the new path, API level and name.
-  Never create `licenses/`: accepting the SDK's terms is the user's.
+  Never create `licenses/`: accepting the SDK's terms is the user's. Google's repository XMLs publish SHA-1 only: check a
+  zip against that. A hand-installed system image gets an AGP-derived id with a comma (`google_apis,page_size_16kb`) and a
+  truncated `package.xml`: write it by hand with the id `system-images;android-36;google_apis_ps16k;arm64-v8a`.
 - The emulator image's WebView is Chrome 133 (Feb 2025) and can't update (no Play Store); a phone's is current.
 - `shouldOverrideUrlLoading` sees neither POSTs nor in-page (history API) navigations, so the logout block is
   defence in depth, as on iOS.
@@ -249,3 +338,27 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - Kotlin can't alias a nested enum or sealed type with a `val` (`val p = Timeline.GroupPosition`): import its values.
 - `--write-verification-metadata` prints "resolved during configuration time" warnings for every configuration:
   harmless, gone in a normal build.
+- **`GOTOOLCHAIN=local` on every `go` command here.** A plain `go env` or `go get` may fetch a newer toolchain (the
+  `toolchain` line in `go.mod`), silently.
+- **A `LinkAnnotation` link in a bubble takes the whole press**: its clickable consumes the down, so the bubble's
+  `combinedClickable` never starts and a hold on a link opened the link, never the sheet. Hence `LinkedText`'s own touches
+  (A34). Its hit test: `getOffsetForPosition` is a cursor position (the right half of a letter gives the next offset),
+  so test the letters on either side with `getBoundingBox`.
+- **Don't read `list.layoutInfo` in `ThreadScreen`'s body**: only `FloatingDay`, inside a `derivedStateOf` that yields the
+  day, or `reduce` and `layout` rerun every scroll frame (the composer's trap again).
+- **Material 3's `SwipeToDismissBox` calls `onDismiss` again whenever it's handed a new lambda while the row is still
+  swiped.** A row that stays in the list (mark unread) toggled the mark back and forth for good (36% CPU). `ArchiveActions`
+  keeps one `onDismiss` for the row's life (`rememberUpdatedState`). Archive never showed it: its row leaves the list. Also
+  `awaitFirstDown(requireUnconsumed = false)` in a swipe over a bubble: the bubble's tap handlers consume the down.
+- **`TextFieldState.text` is a `CharSequence`**: `toString()` before comparing with a `String` (Edit's `text !=
+  edited.body` always differed). `PickMultipleVisualMedia` throws for a maximum under 2, hence the single picker for one
+  slot; `contentReceiver` only works on a `TextFieldState` field.
+- **Demo transaction IDs once were `demo-<ms>`**: a set sent in one millisecond got the same ID, so the same `txn:` key
+  twice in the thread's `LazyColumn` (a crash). A counter fixed it; real IDs come from `IGNewOTID`.
+- **Emulator leftovers that fake bugs:** an app locale left on Arabic by an RTL check (RTL, "ص"; `adb shell cmd locale
+  get-app-locales fi.ferry.messenger`, reset with `set-app-locales fi.ferry.messenger --locales ''`; `debug.force_rtl` does
+  nothing here, and a locale change is also how to force a recreation); after a copy Android's clipboard overlay sits
+  bottom-left over the composer for a few seconds, and a tap there opens Quick Share's setup; a tapped link opens Chrome's
+  first-run screen (force-stop `com.android.chrome`); two `input tap`s in one shell are too slow for a double tap
+  (`input tap x y & sleep 0.12; input tap x y; wait` lands one); the image's keyboard inserts images through
+  `commitContent`, so keyboard insertion is testable; a process death: HOME, `adb shell am kill fi.ferry.messenger`, Recents.
