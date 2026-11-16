@@ -35,7 +35,7 @@ class Room(val id: String) {
     /** The window reached the chat's first message. */
     var reachedStart = false; get() = seen(field); private set
 
-    /** This device's archive: `Inbox.ARCHIVED_TAG` → when (Instagram isn't told). */
+    /** This device's archive (`Inbox.ARCHIVED_TAG` → when) and unread mark (Instagram isn't told of either). */
     var tags: Map<String, JsonElement> = emptyMap()
         get() = seen(field)
         set(value) { field = value; changed() }
@@ -176,7 +176,9 @@ class Room(val id: String) {
     val avatarURL: String?
         get() = stateEvent("m.room.avatar")?.content?.get("url").string?.takeIf { it.isNotEmpty() } ?: bridge?.avatarURL
 
-    val isUnread: Boolean get() = notificationCount > 0 || highlightCount > 0
+    /** Instagram's unread, or marked unread on this device (`Inbox.MARKED_UNREAD_TAG`). */
+    val isUnread: Boolean get() = notificationCount > 0 || highlightCount > 0 || isMarkedUnread
+    val isMarkedUnread: Boolean get() = Inbox.MARKED_UNREAD_TAG in tags
 
     fun memberName(user: String): String? = stateEvent("m.room.member", user)?.content?.get("displayname").string
 

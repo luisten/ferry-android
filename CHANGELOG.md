@@ -62,3 +62,5 @@ What changes for people who use the app, in plain words. The format is
 - Reactions hang a little lower, so the message's time stays readable, and a row of reactions wider than a short
   message of yours no longer moves the message out of line.
 - Swipe a message to the right to reply to it.
+- Mark a chat as unread from the chat list: swipe right on it, or touch and hold it. This stays on your phone;
+  Instagram's own app still shows the chat as read.

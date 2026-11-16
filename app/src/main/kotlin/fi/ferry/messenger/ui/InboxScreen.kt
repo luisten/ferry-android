@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,10 +37,12 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -50,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -81,6 +85,7 @@ import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.Inbox.Folder
 import fi.ferry.messenger.model.Room
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 /** I1, the inbox (DESIGN §4, I1): account stack, title, Folders menu, scope bar, the Requests card, chat rows. */
@@ -179,7 +184,10 @@ fun InboxScreen(
 
 /**
  * DESIGN I1/I4: a row swiped left, or its long press, archives it, or unarchives it in Archived (for TalkBack, an
- * action). Requests have neither: they stay in Requests either way.
+ * action). Requests have neither: they stay in Requests either way. iOS 1.7: swiped right, or from the same menu (before
+ * Archive), Mark as Unread on a read chat and Mark as Read on one marked here, this phone only; neither on a chat
+ * Instagram has unread (opening it reads it, and "Read" from here would have to send "Seen"). A swipe right starts
+ * inside the row: from the screen's left edge it's Android's back (decision A28).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -190,34 +198,65 @@ fun ArchiveActions(room: Room, open: () -> Unit, row: @Composable (Modifier) -> 
     val archived = folder == Folder.ARCHIVED
     val label = if (archived) "Unarchive" else "Archive"
     val act = { menu = false; AppModel.setArchived(!archived, room) }
+    val marked = room.isMarkedUnread
+    val unreadLabel = if (!room.isUnread || marked) (if (marked) "Mark as Read" else "Mark as Unread") else null
+    val unreadIcon = if (marked) Icons.markRead else Icons.markUnread
+    val mark = { menu = false; AppModel.setMarkedUnread(!marked, room) }
     val swipe = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
+    // One `onDismiss` for the row's life: Material calls it again, while the row is still swiped, whenever it's handed a
+    // new one, and a row that stays (marked unread) is recomposed by the change: it flipped back and forth for good.
+    val dismissed by rememberUpdatedState { value: SwipeToDismissBoxValue -> if (value == SwipeToDismissBoxValue.StartToEnd) mark() else act() }
+    val onDismiss = remember(swipe) { { value: SwipeToDismissBoxValue -> dismissed(value); scope.launch { swipe.reset() }; Unit } }
     // As iOS's full swipe: past the threshold it's done, and the row leaves the list (it snaps back if it stays).
-    SwipeToDismissBox(swipe, { SwipeAction(swipe, label, if (archived) Icons.unarchive else Icons.archive) }, enableDismissFromStartToEnd = false,
-        onDismiss = { act(); scope.launch { swipe.reset() } }) {
+    SwipeToDismissBox(
+        swipe,
+        {
+            if (swipe.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                if (unreadLabel != null) SwipeAction(swipe, unreadLabel, unreadIcon, start = true, fill = swipeUnread, ink = Color.White)
+            } else SwipeAction(swipe, label, if (archived) Icons.unarchive else Icons.archive)
+        },
+        enableDismissFromStartToEnd = unreadLabel != null,
+        onDismiss = onDismiss,
+    ) {
         Box {
             row(Modifier.combinedClickable(onClick = open, onLongClick = { menu = true })
-                .semantics { customActions = listOf(CustomAccessibilityAction(label) { act(); true }) })
+                .semantics {
+                    customActions = listOfNotNull(
+                        unreadLabel?.let { CustomAccessibilityAction(it) { mark(); true } },
+                        CustomAccessibilityAction(label) { act(); true },
+                    )
+                })
             DropdownMenu(menu, { menu = false }, offset = DpOffset(86.dp, 0.dp)) {
+                unreadLabel?.let { DropdownMenuItem({ Text(it) }, mark, leadingIcon = { Icon(unreadIcon, null) }) }
                 DropdownMenuItem({ Text(label) }, act, leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
             }
         }
     }
 }
 
-/** What a left swipe uncovers, at the row's right: grey, never an account's colour. Only as wide as the swipe, so the
- * row's own background (the scope's wash) stays. */
+/**
+ * What a swipe uncovers: at the row's right for a left swipe, at its left (`start`) for a right one. Grey, never an
+ * account's colour. Only as wide as the swipe, so the row's own background (the scope's wash) stays.
+ */
 @Composable
-private fun RowScope.SwipeAction(swipe: SwipeToDismissBoxState, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    val width = with(LocalDensity.current) { (-runCatching { swipe.requireOffset() }.getOrDefault(0f)).coerceAtLeast(0f).toDp() }
-    Spacer(Modifier.weight(1f))
-    Box(Modifier.fillMaxHeight().width(width).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+private fun RowScope.SwipeAction(
+    swipe: SwipeToDismissBoxState, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, start: Boolean = false,
+    fill: Color = MaterialTheme.colorScheme.surfaceContainerHighest, ink: Color = LocalContentColor.current,
+) {
+    val width = with(LocalDensity.current) { abs(runCatching { swipe.requireOffset() }.getOrDefault(0f)).toDp() }
+    if (!start) Spacer(Modifier.weight(1f))
+    Box(Modifier.fillMaxHeight().width(width).background(fill), contentAlignment = Alignment.Center) {
         if (width > 64.dp) Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Icon(icon, null, Modifier.size(22.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            Icon(icon, null, Modifier.size(22.dp), tint = ink)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = ink, maxLines = 1)
         }
     }
+    if (start) Spacer(Modifier.weight(1f))
 }
+
+/** iOS's `swipeUnread` (decision A20): a neutral grey, set apart from Archive's, under white. */
+private val swipeUnread: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF636366) else Color(0xFF48484A)
 
 /** Everything archived or in General isn't "no chats yet": say where they went. */
 @Composable
@@ -476,7 +515,7 @@ fun ChatRow(room: Room, showsMark: Boolean, times: Inbox.TimeFormats, modifier: 
     // "Kivo Studio, via Tamo account, 2 unread, You sent a reel, 9:41" (DESIGN §3.7).
     val spoken = listOfNotNull(
         room.name, if (AppModel.accounts.size > 1) identity?.let { "via ${it.name} account" } else null,
-        maxOf(room.notificationCount, room.highlightCount).takeIf { it > 0 }?.let { "$it unread" },
+        maxOf(room.notificationCount, room.highlightCount).let { if (it > 0) "$it unread" else if (room.isMarkedUnread) "marked unread" else null },
         if (typing) "typing" else preview?.text, time,
     ).filter { it.isNotEmpty() }.joinToString(", ")
     Row(

@@ -33,6 +33,7 @@ import kotlin.concurrent.thread
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -129,6 +130,8 @@ object AppModel {
      * (`Inbox.folder`), so a new message still brings the chat back.
      */
     private var archived = mapOf<String, Long>()
+    /** Chats marked unread on this phone (`Inbox.MARKED_UNREAD_TAG`), by room ID, until opened. */
+    private var markedUnread = setOf<String>()
     /** Our photos, GIFs, videos and voice notes on their way or failed, by transaction ID: Retry sends the same file. */
     private val outgoing = mutableMapOf<String, Attachment>()
     private var started = false
@@ -172,6 +175,7 @@ object AppModel {
         requestsSeen = read(REQUESTS_SEEN) ?: emptyMap()
         viewers += read<Map<String, IG.Viewer>>(VIEWERS).orEmpty()
         archived = read(ARCHIVED) ?: emptyMap()
+        markedUnread = read(MARKED_UNREAD) ?: emptySet()
         scopeKey = prefs.getString(SCOPE, "").orEmpty()
         val ids = sessions.accounts()
         for (id in ids) statuses[id] = Status("CONNECTING", null, now())
@@ -310,6 +314,7 @@ object AppModel {
      * isn't a request (core/chat rules.go); it reads here at once, as an update.
      */
     fun markRead(room: Room) {
+        if (room.isMarkedUnread) setMarkedUnread(false, room) // ours: nothing to tell Instagram (the demo's too)
         if (demo || room.id !in rooms) return
         thread { IGCore.markRead(room.id.encodeToByteArray()) }
     }
@@ -502,6 +507,17 @@ object AppModel {
     }
 
     private fun archiveTag(at: Long) = buildJsonObject { put(Inbox.ARCHIVED_AT_KEY, at) }
+
+    /**
+     * Mark as Unread / Read from the inbox: this phone only, as Archive. Opening the chat reads it (`markRead`), and
+     * sends Instagram nothing it wouldn't have: the engine's "Seen" goes only when Instagram had it unread.
+     */
+    fun setMarkedUnread(unread: Boolean, room: Room) {
+        room.tags = if (unread) room.tags + (Inbox.MARKED_UNREAD_TAG to JsonObject(emptyMap())) else room.tags - Inbox.MARKED_UNREAD_TAG
+        markedUnread = if (unread) markedUnread + room.id else markedUnread - room.id
+        write(MARKED_UNREAD, markedUnread)
+        refresh()
+    }
 
     // New message (DESIGN N1)
 
@@ -806,8 +822,10 @@ object AppModel {
         if (initialSyncDone && timeline != null && timeline.limited != true) {
             Timeline.notifiable(timeline.events.orEmpty(), ME, startedAt).takeIf { it.isNotEmpty() }?.let { notify(room, it) }
         }
-        if (!room.isUnread) Notifier.clear(appContext, id)
+        // Instagram's counts, not `isUnread`: a chat marked unread here still loses a notification read elsewhere.
+        if (room.notificationCount == 0 && room.highlightCount == 0) Notifier.clear(appContext, id)
         archived[id]?.let { if (Inbox.ARCHIVED_TAG !in room.tags) room.tags = room.tags + (Inbox.ARCHIVED_TAG to archiveTag(it)) }
+        if (id in markedUnread && !room.isMarkedUnread) room.tags = room.tags + (Inbox.MARKED_UNREAD_TAG to JsonObject(emptyMap()))
         update.profiles?.let { profiles = profiles + it }
     }
 
@@ -827,6 +845,7 @@ object AppModel {
     private const val VIEWERS = "viewers"
     private const val SCOPE = "inbox.scope"
     private const val ARCHIVED = "archived"
+    private const val MARKED_UNREAD = "markedUnread"
     private const val RECENT_REACTIONS = "reactions.recent"
     private const val LOCAL = "local:"
 }

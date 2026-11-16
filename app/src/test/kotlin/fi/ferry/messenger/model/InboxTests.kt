@@ -366,6 +366,15 @@ class InboxTests {
         assertNull(Inbox.preview(Room("!empty"), Fixture.me))
     }
 
+    /** Marked unread on this device: unread for the dot and the counts while Instagram has it read. */
+    @Test fun markedUnreadCountsAsUnread() {
+        val room = portal("!p", Fixture.tamoLogin)
+        assertFalse(room.isUnread)
+        room.tags = mapOf(Inbox.MARKED_UNREAD_TAG to emptyObject)
+        assertTrue(room.isUnread)
+        assertTrue(room.isMarkedUnread)
+    }
+
     /**
      * A reaction to our message (`core/chat`'s reaction log entry): no row in the thread, but the chat's newest message,
      * so it moves the chat up and is the preview, as in Instagram (option B, 2026-11-10).
