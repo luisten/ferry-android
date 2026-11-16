@@ -47,6 +47,16 @@ class DemoTests {
         assertTrue(ada.isUnread.not())
     }
 
+    @Test fun adasTodayIsNeverInTheFuture() {
+        val zone = ZoneId.systemDefault()
+        val midnight = LocalDate.of(2026, 11, 17).atStartOfDay(zone).toInstant().toEpochMilli()
+        for (now in listOf(midnight + 30_000, midnight + 10 * 60_000, this.now)) {
+            val events = room("!debug-demo-days", Demo.rooms(now)).events.filter { it.stateKey == null }
+            assertTrue(events.all { it.originServerTS!! <= now })
+            assertEquals(15, events.count { it.originServerTS!! >= midnight }) // still all today
+        }
+    }
+
     @Test fun elenasPhotoHasNoURL() {
         val elena = Timeline.reduce(room("!debug-demo-4"), me)
         assertEquals(MessageKind.Image, elena.first().kind)

@@ -195,7 +195,10 @@ object Demo {
         val zone = ZoneId.systemDefault()
         val midnight = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().atStartOfDay(zone)
         fun at(daysAgo: Long, hour: Int, minute: Int) = midnight.minusDays(daysAgo).withHour(hour).withMinute(minute).toInstant().toEpochMilli()
-        val today = midnight.toInstant().toEpochMilli() + 60_000
+        // Today's messages run 4 minutes apart, closer just after midnight (at most a 16th of the time since), so none
+        // is in the future.
+        val step = minOf(240_000L, (now - midnight.toInstant().toEpochMilli()) / 16)
+        val today = midnight.toInstant().toEpochMilli() + step
         val long = "I went through the whole schedule again and the load-in moved to the afternoon, so the soundcheck is at 4, " +
             "doors at 7 and the first act at 8; the north door is the one with the ramp, and parking is behind the loading dock"
         val lines = listOf(
@@ -208,22 +211,22 @@ object Demo {
             Triple(true, at(1, 9, 0), "Morning! Coffee first"),
             Triple(false, at(1, 9, 2), "Always"),
             Triple(false, today, "Morning! Did you see the schedule?"),
-            Triple(true, today + 1 * 240_000, "Just now, it looks good"),
-            Triple(false, today + 2 * 240_000, "See https://lowtide.band/annex?day=14, www.example.org. Mail sam@example.com or call +1 555 0100"),
-            Triple(true, today + 3 * 240_000, "Tickets at lowtide.band/annex."),
-            Triple(false, today + 4 * 240_000, "👍"),
-            Triple(true, today + 5 * 240_000, "🎉🎉"),
-            Triple(false, today + 6 * 240_000, long),
-            Triple(true, today + 7 * 240_000, "Which door?"),
-            Triple(false, today + 8 * 240_000, "North one, by the ramp"),
-            Triple(false, today + 9 * 240_000, "I'll be there from 3"),
-            Triple(true, today + 11 * 240_000, "Haha ok"),
-            Triple(true, today + 12 * 240_000, "See you at 8"),
-            Triple(false, today + 13 * 240_000, "Bringing the speaker"),
-            Triple(true, today + 14 * 240_000, "Perfect"),
+            Triple(true, today + 1 * step, "Just now, it looks good"),
+            Triple(false, today + 2 * step, "See https://lowtide.band/annex?day=14, www.example.org. Mail sam@example.com or call +1 555 0100"),
+            Triple(true, today + 3 * step, "Tickets at lowtide.band/annex."),
+            Triple(false, today + 4 * step, "👍"),
+            Triple(true, today + 5 * step, "🎉🎉"),
+            Triple(false, today + 6 * step, long),
+            Triple(true, today + 7 * step, "Which door?"),
+            Triple(false, today + 8 * step, "North one, by the ramp"),
+            Triple(false, today + 9 * step, "I'll be there from 3"),
+            Triple(true, today + 11 * step, "Haha ok"),
+            Triple(true, today + 12 * step, "See you at 8"),
+            Triple(false, today + 13 * step, "Bringing the speaker"),
+            Triple(true, today + 14 * step, "Perfect"),
         )
         // Ours, unsent (a tombstone: `unsigned.redacted_because` and no content), after "Which door?".
-        val tombstone = Event("m.room.message", emptyObject, "\$debug-days-unsent", IGAdapter.ME, originServerTS = today + 7 * 240_000 + 60_000,
+        val tombstone = Event("m.room.message", emptyObject, "\$debug-days-unsent", IGAdapter.ME, originServerTS = today + 7 * step + step / 4,
             unsigned = Event.Unsigned(redactedBecause = buildJsonObject { put("type", "m.room.redaction") }))
         return dm("!debug-demo-days", "Ada Lind", ADA, TAMO, request = false, unread = 0, lines, extras = { listOf(tombstone) }).apply {
             addPending(PendingMessage("debug-failed", buildJsonObject { put("msgtype", "m.text"); put("body", "Running late, save me a seat") },

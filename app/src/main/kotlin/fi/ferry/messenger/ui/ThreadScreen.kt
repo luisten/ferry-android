@@ -247,14 +247,16 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     LaunchedEffect(room.events.lastOrNull()?.eventID) { AppModel.markRead(room) }
     // iOS 1.5: a chat that opens unread holds its "New messages" line near the top, the last message read above it,
     // unless what's new reaches less than a quarter screen past it: then it opens at the end. Hidden until placed (1 s
-    // at most). A touch, the jump button or a send lets go.
-    val lineRow = remember(roomID) { rows.indexOfFirst { it.startsUnread } }
-    var holdsLine by remember(roomID) { mutableStateOf(unreadAfter != null && lineRow >= 0) }
+    // at most). A touch, the jump button or a send lets go. iOS 1.6.5: an older page that brings the last message read,
+    // or moves the line further back (a mailbox copy that was all unread), places it again while it's held.
+    val lineAnchor = rows.indexOfFirst { it.startsUnread }.let { i -> rows.getOrNull(i)?.id to (i > 0) }
+    var holdsLine by remember(roomID) { mutableStateOf(unreadAfter != null && lineAnchor.first != null) }
     var revealed by remember(roomID) { mutableStateOf(!holdsLine) }
-    LaunchedEffect(roomID) {
+    LaunchedEffect(roomID, lineAnchor) {
         if (!holdsLine) return@LaunchedEffect
         launch { delay(1_000); revealed = true }
         snapshotFlow { list.layoutInfo.viewportSize.height }.first { it > 0 }
+        val lineRow = rows.indexOfFirst { it.startsUnread }
         val line = rows.size - 1 - lineRow + if (typing) 1 else 0 // reversed: index 0 is the newest, at the bottom
         list.scrollToItem(line) // the line's row near the bottom (higher up when the chat's start is close)
         val info = list.layoutInfo
@@ -264,7 +266,8 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
         // Reversed, offsets count up from the bottom: the line's top edge goes to the top, less the last message read.
         if (lineItem != null) list.scrollBy(-(info.viewportEndOffset - context - (lineItem.offset + lineItem.size)).toFloat())
         val below = -list.scrollBy(-1e7f) // what's under the screen there (it ends at the end)
-        if (below - context > viewport / 4) list.scrollBy(below) else holdsLine = false
+        // The first row loaded is already unread: the last message read is still to come with a page, so hold on.
+        if (below - context > viewport / 4 || lineRow == 0 && !room.reachedStart) list.scrollBy(below) else holdsLine = false
         revealed = true
     }
     LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) holdsLine = false } }
