@@ -70,8 +70,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
@@ -116,26 +118,40 @@ class MessageActions(
 
 /**
  * A long press opens the message's menu: the reaction row, Reply, Copy, Edit, Unsend (or Delete for a failed send).
- * A double tap hearts it, like Instagram; a tap on a failed send retries it.
+ * A double tap hearts it, like Instagram; a tap on a failed send retries it. `label`: TalkBack's words for the bubble
+ * (decision A18), `extraActions` its other actions ("Open lowtide.band").
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageMenu(message: Message, actions: MessageActions, content: @Composable () -> Unit) {
+fun MessageMenu(
+    message: Message, actions: MessageActions, label: String? = null, extraActions: List<CustomAccessibilityAction> = emptyList(),
+    content: @Composable () -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     val tap = remember { TapTarget() }
-    SideEffect { tap.hold = { if (message.kind != MessageKind.Unsent) open = true } }
     var confirmUnsend by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val canSend = !actions.readOnly && message.eventID != null
     val mine = message.reactions.firstOrNull { it.myEventID != null }?.key
     val copyable = message.shareText ?: message.body.takeIf { message.kind.media == null && it.isNotEmpty() }
     val failed = message.status is Message.Status.Failed
+    val click = { if (failed) actions.retry(message) else tap.action?.invoke() }
+    val heart = if (canSend && message.kind.media == null && (mine == null || !Message.Reaction.same(mine, "❤️"))) ({ actions.react("❤️", message) }) else null
+    SideEffect {
+        tap.hold = { if (message.kind != MessageKind.Unsent) open = true }
+        tap.click = { click() }
+        tap.heart = heart
+    }
     Box(
         Modifier.combinedClickable(
-            onClick = { if (failed) actions.retry(message) else tap.action?.invoke() },
-            onDoubleClick = if (canSend && message.kind.media == null && (mine == null || !Message.Reaction.same(mine, "❤️"))) ({ actions.react("❤️", message) }) else null,
+            onClick = { click() },
+            onDoubleClick = heart,
             onLongClick = { if (message.kind != MessageKind.Unsent) open = true },
-        ).semantics { if (message.kind != MessageKind.Unsent) onLongClick("React or reply") { open = true; true } },
+        ).semantics {
+            label?.let { contentDescription = it }
+            if (extraActions.isNotEmpty()) customActions = extraActions
+            if (message.kind != MessageKind.Unsent) onLongClick("React or reply") { open = true; true }
+        },
     ) {
         CompositionLocalProvider(LocalTap provides tap) { content() }
     }

@@ -72,6 +72,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -121,6 +122,9 @@ val LocalMedia = compositionLocalOf<MediaContext?> { null }
 class TapTarget {
     var action: (() -> Unit)? = null
     var hold: (() -> Unit)? = null
+    /** The message's own tap and double tap (a heart, when it may get one), for a text with links that takes its touches. */
+    var click: () -> Unit = {}
+    var heart: (() -> Unit)? = null
 }
 
 val LocalTap = compositionLocalOf<TapTarget?> { null }
@@ -157,15 +161,28 @@ private fun fetch(url: String, mimetype: String?, room: Room, failed: () -> Unit
     }
 }
 
-/** DESIGN §6.3–6.8: the card for a message's media; the one-line placeholder for what has none to show. */
+/**
+ * DESIGN §6.3–6.8: the card for a message's media; the one-line placeholder for what has none to show. `time` (iOS 1.7):
+ * on a dark capsule in the card's corner; a voice note has it under its length, clear of the bars.
+ */
 @Composable
-fun MediaBubble(message: Message, kind: MessageKind, placeholder: @Composable () -> Unit) {
+fun MediaBubble(message: Message, kind: MessageKind, time: String?, placeholder: @Composable () -> Unit) {
     val media = MediaInfo(message.content)
     // Instagram reports no upload progress: a spinner until it answers.
     val uploading = message.isLocalEcho && message.status == Message.Status.Sending
+    val voice = media.album.size < 2 && (kind == MessageKind.Voice || kind == MessageKind.Audio) && media.url != null
+    if (voice) return VoiceBubble(message, media, time)
+    Box {
+        MediaCard(message, kind, media, uploading, placeholder)
+        time?.let { CardTime(it, Modifier.align(Alignment.BottomEnd), spoken = true) }
+    }
+}
+
+@Composable
+private fun MediaCard(message: Message, kind: MessageKind, media: MediaInfo, uploading: Boolean, placeholder: @Composable () -> Unit) {
     when {
         media.album.size >= 2 -> AlbumPile(message, media)
-        kind == MessageKind.Voice || kind == MessageKind.Audio -> if (media.url != null) VoiceBubble(message, media) else placeholder()
+        kind == MessageKind.Voice || kind == MessageKind.Audio -> placeholder() // no file
         (kind == MessageKind.Image || kind == MessageKind.Gif || kind == MessageKind.Sticker) && media.url != null ->
             PhotoCard(message.id, media, sticker = kind == MessageKind.Sticker, tapHere = true, uploading = uploading)
         kind == MessageKind.Video && media.url != null -> VideoCard(message, media, share = null, tapHere = true, uploading = uploading)
@@ -173,6 +190,17 @@ fun MediaBubble(message: Message, kind: MessageKind, placeholder: @Composable ()
         kind is MessageKind.Share && (kind.type == ShareType.REEL || kind.type == ShareType.STORY) -> VideoCard(message, media, kind, tapHere = true)
         else -> placeholder() // view once, files, other shares, the mailbox's copies before the thread is read
     }
+}
+
+/**
+ * iOS 1.7: a card's time (a photo, video, link preview) on a dark capsule in its corner, readable over any picture.
+ * `spoken`: TalkBack reads it after the card's own words; a link's bubble says its time itself.
+ */
+@Composable
+fun CardTime(time: String, modifier: Modifier, spoken: Boolean) {
+    Text(time, modifier.padding(6.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape).padding(horizontal = 6.dp, vertical = 2.dp)
+        .clearAndSetSemantics { if (spoken) contentDescription = time },
+        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"), color = Color.White)
 }
 
 /** Fits `w`×`h` inside `maxW`×`maxH` (dp); 200×200 without a size. */
@@ -385,7 +413,8 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
                 style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         media.duration?.let {
-            Text(clock(it), Modifier.align(Alignment.BottomEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
+            // Bottom start: the bubble's time has the bottom end (iOS 1.7).
+            Text(clock(it), Modifier.align(Alignment.BottomStart).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
                 .padding(horizontal = 8.dp, vertical = 2.dp), color = Color.White, style = MaterialTheme.typography.labelSmall)
         }
         Box(Modifier.align(Alignment.Center)) {
@@ -445,7 +474,7 @@ private fun PostCard(message: Message, media: MediaInfo) {
  * and while it plays the speed. Drag the bars to seek.
  */
 @Composable
-private fun VoiceBubble(message: Message, media: MediaInfo) {
+private fun VoiceBubble(message: Message, media: MediaInfo, time: String?) {
     val context = LocalContext.current
     val ctx = LocalMedia.current
     val own = message.isOwn
@@ -498,7 +527,11 @@ private fun VoiceBubble(message: Message, media: MediaInfo) {
                     Size(bar, barHeight), CornerRadius(bar / 2))
             }
         }
-        Text(clock(if (loaded) position else duration), color = ink, style = MaterialTheme.typography.labelMedium)
+        Column(horizontalAlignment = Alignment.End) {
+            Text(clock(if (loaded) position else duration), color = ink, style = MaterialTheme.typography.labelMedium)
+            time?.let { Text(it, Modifier.clearAndSetSemantics { contentDescription = it }, color = ink.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum")) }
+        }
         if (loaded) {
             Text("${VoicePlayer.speed.toString().removeSuffix(".0")}×", Modifier.clip(CircleShape).clickable { VoicePlayer.cycleSpeed() }
                 .background(ink.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp), color = ink, style = MaterialTheme.typography.labelSmall)

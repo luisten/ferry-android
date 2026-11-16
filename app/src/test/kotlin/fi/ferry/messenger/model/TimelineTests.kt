@@ -498,6 +498,11 @@ class TimelineTests {
         assertEquals("From Theo Park, hi, 9:41", Timeline.spokenLabel(group[0], "hi", "9:41", "Tamo", "Theo Park"))
         assertEquals("From Theo Park, hi, 9:42", Timeline.spokenLabel(group[1], "hi", "9:42", "Tamo", "Theo Park"))
         assertEquals("From you, as Tamo: hi, 9:43", Timeline.spokenLabel(group[2].copy(startsDay = true), "hi", "9:43", "Tamo", "Theo Park"))
+
+        // A card's: the sender alone, none inside a DM's run (the card says "Photo" and its time itself).
+        assertEquals("From Kivo", Timeline.spokenSender(dm[0], "Tamo", "Kivo"))
+        assertNull(Timeline.spokenSender(dm[1], "Tamo", "Kivo"))
+        assertEquals("From Theo Park", Timeline.spokenSender(group[1], "Tamo", "Theo Park"))
     }
 
     @Test fun dayLabels() {

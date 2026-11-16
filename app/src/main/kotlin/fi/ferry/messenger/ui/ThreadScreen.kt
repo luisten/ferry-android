@@ -7,6 +7,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -15,12 +17,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -35,6 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -61,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -72,28 +76,40 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.ferry.messenger.AppModel
@@ -104,6 +120,7 @@ import fi.ferry.messenger.VoiceRecorder
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.LinkPreview
+import fi.ferry.messenger.model.Links
 import fi.ferry.messenger.model.MediaInfo
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessageKind
@@ -114,6 +131,7 @@ import fi.ferry.messenger.model.Timeline.GroupPosition
 import fi.ferry.messenger.model.UserProfile
 import fi.ferry.messenger.model.parseURL
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Dispatchers
@@ -121,6 +139,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -344,6 +363,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                         }
                         item("top") { Top(room, identity, messages.isEmpty()) }
                     }
+                    FloatingDay(list, rows, times, Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
                     androidx.compose.animation.AnimatedVisibility(showsJump, Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 8.dp),
                         enter = fadeIn() + scaleIn(initialScale = 0.8f), exit = fadeOut() + scaleOut(targetScale = 0.8f)) {
                         JumpButton(Timeline.newCount(messages, jumpSince ?: Long.MAX_VALUE)) {
@@ -484,11 +504,8 @@ private fun MessageRow(
     val own = message.isOwn
     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().padding(top = row.spacing.dp)) {
+        if (row.startsDay) DayChip(times.day(message.ts)) // above the line, as iOS
         if (row.startsUnread) UnreadLine()
-        if (row.startsDay) { // placeholder until the day chip (R1.5)
-            Text(times.label(message.ts), Modifier.fillMaxWidth().padding(bottom = 6.dp), style = MaterialTheme.typography.labelMedium,
-                color = secondary, textAlign = TextAlign.Center)
-        }
         if (message.kind.isChatEvent) {
             // Instagram's own lines and what the app can't show: small centred text across the thread.
             val text = (message.kind as? MessageKind.Unsupported)?.let { "${people.firstName(message.sender)} sent ${it.what}. Open Instagram to see it." } ?: message.body
@@ -496,10 +513,24 @@ private fun MessageRow(
             return@Column
         }
         val indent = if (row.groupSender == null) 0.dp else GROUP_INDENT
+        val clock = times.clock(message.ts)
+        // TalkBack (iOS's `spoken`): one description for the bubble, the sender, the text and the time; a card says what
+        // it is and its time itself, after the sender. The links in the text are its actions.
+        val context = LocalContext.current
+        val words = message.body.takeIf { message.shareText == null && message.kind in TEXT_KINDS }
+        val label = when {
+            message.kind == MessageKind.Unsent -> null
+            words != null -> Timeline.spokenLabel(row, words, clock, identity?.name, people.name(message.sender))
+            else -> Timeline.spokenSender(row, identity?.name, people.name(message.sender))
+        }
+        val linkActions = Links.find(message.shareText ?: words.orEmpty()).map { link ->
+            CustomAccessibilityAction("Open ${parseURL(link.url)?.host ?: link.url}") { openLink(context, link.url); true }
+        }
         Column(Modifier.fillMaxWidth(), horizontalAlignment = if (own) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(3.dp)) {
             if (row.groupSender?.showsName == true && message.reply == null) {
-                // Neutral, never coloured: colour means account.
-                Text(people.name(message.sender), Modifier.padding(start = indent + 12.dp), style = MaterialTheme.typography.labelMedium, color = secondary, maxLines = 1)
+                // Neutral, never coloured: colour means account. The bubble says it to TalkBack.
+                Text(people.name(message.sender), Modifier.padding(start = indent + 12.dp).clearAndSetSemantics {}, style = MaterialTheme.typography.labelMedium,
+                    color = secondary, maxLines = 1)
             }
             message.reply?.let { Quote(it, message, row, people, Modifier.padding(start = indent)) }
             ShareCaption.of(message.content).eyebrow?.takeIf { message.kind != MessageKind.Unsent }?.let {
@@ -507,7 +538,7 @@ private fun MessageRow(
             }
             Row(verticalAlignment = Alignment.Bottom) {
                 row.groupSender?.let { sender ->
-                    Box(Modifier.size(GROUP_AVATAR).offset(y = if (message.reactions.isEmpty()) 0.dp else (-14).dp)) {
+                    Box(Modifier.size(GROUP_AVATAR).offset(y = if (message.reactions.isEmpty()) 0.dp else -PILL_DROP)) {
                         if (sender.showsAvatar) Box(Modifier.clip(CircleShape).clickable(onClickLabel = "Show who they are") { showPerson(message.sender) }
                             .semantics { contentDescription = people.name(message.sender) }) {
                             Picture(people.avatar(message.sender), people.name(message.sender), GROUP_AVATAR)
@@ -516,13 +547,10 @@ private fun MessageRow(
                     Spacer(Modifier.width(6.dp))
                 }
                 Box(Modifier.fillMaxWidth(0.75f), contentAlignment = if (own) Alignment.BottomEnd else Alignment.BottomStart) {
-                    Box(Modifier.padding(bottom = if (message.reactions.isEmpty()) 0.dp else 14.dp)) {
-                        MessageMenu(message, actions) {
-                            Bubble(message, row.position, identity, people) {
-                                if (message.reactions.isNotEmpty()) {
-                                    ReactionPills(message, people, isGroup, Modifier.align(if (own) Alignment.BottomStart else Alignment.BottomEnd)
-                                        .offset(x = if (own) (-8).dp else 8.dp, y = 14.dp)) { showReactions(message) }
-                                }
+                    Box(Modifier.padding(bottom = if (message.reactions.isEmpty()) 0.dp else PILL_DROP)) {
+                        MessageMenu(message, actions, label, linkActions) {
+                            Bubble(message, row.position, identity, people, clock.takeIf { message.kind != MessageKind.Unsent }) {
+                                if (message.reactions.isNotEmpty()) ReactionPills(message, people, isGroup) { showReactions(message) }
                             }
                         }
                     }
@@ -569,6 +597,49 @@ private fun JumpButton(count: Int, jump: () -> Unit) {
     }
 }
 
+/** iOS 1.7: a day's start ("Today", "Mon 3 Nov") above its first row; a heading, so TalkBack can go day by day. */
+@Composable
+private fun DayChip(text: String) {
+    Box(Modifier.fillMaxWidth().padding(bottom = 12.dp), contentAlignment = Alignment.Center) { DayCapsule(text, Modifier.semantics { heading() }) }
+}
+
+/** The day chip's capsule (decision A15): the surface with a light shadow, as the jump button; never a bubble's grey. */
+@Composable
+private fun DayCapsule(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier.shadow(2.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 5.dp),
+        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+}
+
+/** The top row's day on the thread while the user scrolls it (iOS 1.7). */
+private data class Day(val date: LocalDate, val chipped: Boolean)
+
+/**
+ * iOS 1.7: while the user scrolls, the top row's day floats under the header, unless that row has its own chip; it
+ * goes a second after the scroll stops (decision A27). The jump button's and following the end's scrolls make no drag,
+ * so they never show it. Only this reads the list's layout, and only as the day: the thread around it isn't
+ * recomposed each frame (the composer's trap). Hidden from TalkBack (the chips say the day) and from touches.
+ */
+@Composable
+private fun FloatingDay(list: LazyListState, rows: List<Timeline.Row>, times: ThreadTimes, modifier: Modifier) {
+    val byID by rememberUpdatedState(remember(rows) { rows.associateBy { it.id } })
+    val zone = ZoneId.systemDefault()
+    val top by remember(list) {
+        derivedStateOf {
+            // Reversed: the highest index on screen is the top row; the spinner or start block and typing aren't rows.
+            val id = list.layoutInfo.visibleItemsInfo.lastOrNull { it.key != "top" && it.key != "typing" }?.key as? String
+            id?.let { byID[it] }?.let { Day(Instant.ofEpochMilli(it.message.ts).atZone(zone).toLocalDate(), it.startsDay) }
+        }
+    }
+    var dragged by remember(list) { mutableStateOf(false) }
+    LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) dragged = true } }
+    LaunchedEffect(list) { snapshotFlow { list.isScrollInProgress }.collectLatest { if (!it) { delay(1_000); dragged = false } } }
+    val day = top
+    androidx.compose.animation.AnimatedVisibility(dragged && day != null && !day.chipped, modifier.clearAndSetSemantics {},
+        enter = fadeIn(tween(200, easing = EaseOut)), exit = fadeOut(tween(200, easing = EaseOut))) {
+        day?.let { DayCapsule(times.day(it.date.atStartOfDay(zone).toInstant().toEpochMilli())) }
+    }
+}
+
 /** Where what you hadn't read starts, when the chat opened unread. */
 @Composable
 private fun UnreadLine() {
@@ -582,23 +653,49 @@ private fun UnreadLine() {
 
 /**
  * A message's bubble; a story reply or reaction is the story with what was sent under it, as Instagram shows them.
- * `pills` sit on the bubble's last part: the text under a story or a share, not the card's far edge.
+ * `pills` and the time (iOS 1.7, `time`: none on a tombstone) sit on the bubble's last part: the text under a story or
+ * a share, not the card's far edge.
  */
 @Composable
-private fun Bubble(message: Message, position: GroupPosition, identity: AccountIdentity?, people: People, pills: @Composable BoxScope.() -> Unit) {
+private fun Bubble(message: Message, position: GroupPosition, identity: AccountIdentity?, people: People, time: String?, pills: @Composable () -> Unit) {
     val own = message.isOwn
     val shape = bubbleShape(position, own)
     val fill = if (own) identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground else Bubbles.incoming
     val text = if (own) Color.White else MaterialTheme.colorScheme.onBackground
     val share = message.shareText
     Column(horizontalAlignment = if (own) Alignment.End else Alignment.Start, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Box { BubbleBody(message, shape, fill, text, people); if (share == null) pills() }
-        share?.let { Box { TextBubble(it, bubbleShape(GroupPosition.SINGLE, own), fill, text); pills() } }
+        if (share == null) PillLayout(own, pills) { BubbleBody(message, shape, fill, text, people, time) }
+        else BubbleBody(message, shape, fill, text, people, time = null)
+        share?.let {
+            // Its words go after the card's (the bubble's description names only the sender).
+            PillLayout(own, pills) { TextBubble(it, bubbleShape(GroupPosition.SINGLE, own), fill, text, own, time.orEmpty(), spoken = listOfNotNull(it, time).joinToString(", ")) }
+        }
+    }
+}
+
+/**
+ * The bubble with its reaction pills on the bottom edge (iOS 1.6.1's `PillPlacement`, decision A26): the pills at their
+ * own size, never offered the bubble's width (iOS's squeeze) and never widening it (a Box did: our short bubble slid
+ * out of line), 8 dp past its inner corner; too wide, they grow inward from 6 dp inside the outer edge, level with
+ * "Seen". The bubble's size is the layout's; the pills hang `PILL_DROP` below it, outside.
+ */
+@Composable
+private fun PillLayout(own: Boolean, pills: @Composable () -> Unit, bubble: @Composable () -> Unit) {
+    Layout(contents = listOf({ Box { bubble() } }, pills)) { (bubbles, pill), constraints ->
+        val body = bubbles.first().measure(constraints)
+        val p = pill.firstOrNull()?.measure(Constraints())
+        layout(body.width, body.height) {
+            body.place(0, 0)
+            if (p != null) {
+                val x = if (own) minOf(-8.dp.roundToPx(), body.width - 6.dp.roundToPx() - p.width) else maxOf(body.width + 8.dp.roundToPx() - p.width, 6.dp.roundToPx())
+                p.place(x, body.height + PILL_DROP.roundToPx() - p.height)
+            }
+        }
     }
 }
 
 @Composable
-private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color, text: Color, people: People) {
+private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color, text: Color, people: People, time: String?) {
     val own = message.isOwn
     when (val kind = message.kind) {
         MessageKind.Unsent -> {
@@ -612,10 +709,65 @@ private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color,
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        MessageKind.Text, MessageKind.Notice -> TextBubble(message.body, shape, fill, text)
-        MessageKind.Link -> LinkBubble(message, shape, fill, text)
+        MessageKind.Text, MessageKind.Notice -> TextBubble(message.body, shape, fill, text, own, time.orEmpty())
+        MessageKind.Link -> LinkBubble(message, shape, fill, text, time.orEmpty())
         // ponytail: a labelled card until A6 shows the media itself (photos, videos, voice, GIFs, shares).
-        else -> MediaBubble(message, kind) { MediaPlaceholder(kind, message, shape, fill, text) }
+        else -> MediaBubble(message, kind, time) { MediaPlaceholder(kind, message, shape, fill, text) }
+    }
+}
+
+/** The kinds whose bubble is their text, which TalkBack reads with the sender and the time. */
+private val TEXT_KINDS = setOf(MessageKind.Text, MessageKind.Notice, MessageKind.Link)
+
+/** How far the reaction pills hang below the bubble (iOS 1.7): low enough to leave its time readable. */
+private val PILL_DROP = 22.dp
+
+/**
+ * A message's text with its web links (iOS 1.6.4, `Links.find`) underlined in the text's own colour (colour means
+ * account). With links the text takes its own touches (decision A34, the plan's fallback B): a tap on a link opens it,
+ * elsewhere it's the bubble's tap; a hold and a double tap stay the bubble's (its sheet, a heart). Compose's
+ * `LinkAnnotation` took the whole press, so a hold on a link opened the link and never the sheet (seen on the
+ * emulator); iOS too attaches its hold only with links. `time`: a clear copy of the bubble's time after the last word,
+ * the room the shown one sits in.
+ */
+@Composable
+private fun LinkedText(body: String, time: String?, modifier: Modifier, color: Color) {
+    val links = remember(body) { Links.find(body) }
+    val small = MaterialTheme.typography.labelSmall.fontSize
+    val text = remember(body, time, small) {
+        buildAnnotatedString {
+            append(body)
+            for (link in links) addStyle(SpanStyle(textDecoration = TextDecoration.Underline), link.range.first, link.range.last + 1)
+            if (time != null) withStyle(SpanStyle(color = Color.Transparent, fontSize = small, fontFeatureSettings = "tnum")) { append("  $time") }
+        }
+    }
+    val layout = remember { mutableStateOf<TextLayoutResult?>(null) }
+    val tap = LocalTap.current
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    val touches = if (links.isEmpty() || tap == null) Modifier else Modifier.pointerInput(links) {
+        fun linkAt(at: Offset): Links.Link? {
+            val l = layout.value ?: return null
+            val line = l.getLineForVerticalPosition(at.y)
+            if (at.x < l.getLineLeft(line) || at.x > l.getLineRight(line)) return null // past the line's end
+            val i = l.getOffsetForPosition(at)
+            return links.firstOrNull { i in it.range }
+        }
+        detectTapGestures(
+            onDoubleTap = { tap.heart?.invoke() },
+            onLongPress = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); tap.hold?.invoke() },
+            onTap = { at -> linkAt(at)?.let { openLink(context, it.url) } ?: tap.click() },
+        )
+    }
+    Text(text, modifier.then(touches), style = MaterialTheme.typography.bodyLarge, color = color, onTextLayout = { layout.value = it })
+}
+
+/** A web link, in the phone's browser; a phone without one says so instead of crashing. */
+private fun openLink(context: android.content.Context, url: String) {
+    try {
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+    } catch (_: android.content.ActivityNotFoundException) {
+        AppModel.actionError = "No app on this phone opens links."
     }
 }
 
@@ -624,35 +776,53 @@ private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color,
  * that tall), title and site. The preview is the link: a tap opens it, a hold is the message's.
  */
 @Composable
-private fun LinkBubble(message: Message, shape: RoundedCornerShape, fill: Color, text: Color) {
-    val preview = LinkPreview.of(message.content)
+private fun LinkBubble(message: Message, shape: RoundedCornerShape, fill: Color, text: Color, time: String) {
+    val preview = LinkPreview.of(message.content) ?: return TextBubble(message.body, shape, fill, text, message.isOwn, time)
     val context = LocalContext.current
-    Column(Modifier.then(if (preview != null) Modifier.width(240.dp) else Modifier).clip(shape).background(fill)) {
-        Text(message.body, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge, color = text)
-        if (preview == null) return@Column
-        Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.06f))
-            .ownTap { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(preview.url))) }) {
-            preview.imageURL?.let { url ->
-                val px = with(LocalDensity.current) { 240.dp.roundToPx() }
-                Box(Modifier.fillMaxWidth().height(240.dp * (preview.aspect ?: 0.525).coerceIn(0.4, 1.0).toFloat())
-                    .background(MaterialTheme.colorScheme.surfaceVariant)) {
-                    Pictures.load(url, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+    Box(Modifier.width(240.dp).clip(shape).background(fill)) {
+        Column {
+            LinkedText(message.body, null, Modifier.padding(horizontal = 12.dp, vertical = 8.dp).clearAndSetSemantics {}, text)
+            Column(Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.06f)).ownTap { openLink(context, preview.url) }) {
+                preview.imageURL?.let { url ->
+                    val px = with(LocalDensity.current) { 240.dp.roundToPx() }
+                    Box(Modifier.fillMaxWidth().height(240.dp * (preview.aspect ?: 0.525).coerceIn(0.4, 1.0).toFloat())
+                        .background(MaterialTheme.colorScheme.surfaceVariant)) {
+                        Pictures.load(url, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                    }
+                }
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
+                    Text(parseURL(preview.url)?.host ?: preview.url, style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f))
                 }
             }
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
-                Text(parseURL(preview.url)?.host ?: preview.url, style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f))
-            }
         }
+        CardTime(time, Modifier.align(Alignment.BottomEnd), spoken = false)
     }
 }
 
+/**
+ * A text in its bubble, its links underlined, and its time in the corner (iOS 1.7, decision A17): a clear copy of the
+ * time ends the text, so the shown one sits on the last line when it fits, else on a line of its own (WhatsApp's). Both
+ * texts are hidden from TalkBack, which reads the bubble's description instead (`spoken`, or `MessageMenu`'s label):
+ * the clear copy would read the time twice. Emoji alone: no bubble, the time beside them.
+ */
 @Composable
-private fun TextBubble(body: String, shape: RoundedCornerShape, fill: Color, text: Color) {
+private fun TextBubble(body: String, shape: RoundedCornerShape, fill: Color, text: Color, own: Boolean, time: String, spoken: String? = null) {
+    val words = Modifier.clearAndSetSemantics { spoken?.let { contentDescription = it } }
+    val clock = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum")
     if (isEmojiOnly(body)) {
-        Text(body, fontSize = 48.sp) // DESIGN §6.1: no bubble
+        Row(words, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val beside = @Composable { Text(time, Modifier.alignByBaseline(), style = clock, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (own) beside()
+            Text(body, Modifier.alignByBaseline(), fontSize = 48.sp) // DESIGN §6.1: no bubble
+            if (!own) beside()
+        }
     } else {
-        Text(body, Modifier.background(fill, shape).padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyLarge, color = text)
+        Box(Modifier.background(fill, shape).then(words)) {
+            LinkedText(body, time, Modifier.padding(horizontal = 12.dp, vertical = 8.dp), text)
+            Text(time, Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 6.dp), style = clock,
+                color = if (own) Color.White.copy(alpha = 0.8f) else Bubbles.timeOnIncoming)
+        }
     }
 }
 
@@ -715,19 +885,20 @@ private fun Quote(reply: Message.Reply, message: Message, row: Timeline.Row, peo
 
 /** Emoji + count in a DM; in a group each emoji with up to three faces (DESIGN §6.2). Opens who reacted. */
 @Composable
-private fun ReactionPills(message: Message, people: People, isGroup: Boolean, modifier: Modifier, show: () -> Unit) {
+private fun ReactionPills(message: Message, people: People, isGroup: Boolean, show: () -> Unit) {
     val spoken = "Reactions: " + message.reactions.joinToString(", ") { r ->
         if (isGroup) "${r.key} from ${r.senders.joinToString(" and ") { if (it == AppModel.ME) "you" else people.name(it) }}"
         else if (r.count > 1) "${r.key} ${r.count}" else r.key
     }
     Row(
-        modifier.shadow(2.dp, CircleShape).border(2.dp, MaterialTheme.colorScheme.background, CircleShape).background(Bubbles.reaction, CircleShape)
+        Modifier.shadow(2.dp, CircleShape).border(2.dp, MaterialTheme.colorScheme.background, CircleShape).background(Bubbles.reaction, CircleShape)
             .clickable(onClick = show).heightIn(min = 24.dp).padding(horizontal = 6.dp, vertical = 2.dp)
             .clearAndSetSemantics { contentDescription = spoken },
-        horizontalArrangement = Arrangement.spacedBy(if (isGroup) 6.dp else 2.dp), verticalAlignment = Alignment.CenterVertically,
+        // iOS 1.6.1's spacing: 10 between a group's emoji, 1 between an emoji and its faces.
+        horizontalArrangement = Arrangement.spacedBy(if (isGroup) 10.dp else 2.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
         for (r in message.reactions) {
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(if (isGroup) 1.dp else 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(r.key, fontSize = 14.sp)
                 if (isGroup) {
                     Row(horizontalArrangement = Arrangement.spacedBy((-5).dp)) {
@@ -770,19 +941,18 @@ private fun TypingBubble(modifier: Modifier) {
     }
 }
 
-/** The thread's own colours (DESIGN §8.1): the incoming bubble and the reaction pills. */
+/** The thread's own colours (DESIGN §8.1): the incoming bubble, the reaction pills, the time on an incoming bubble. */
 object Bubbles {
     val incoming: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF262629) else Color(0xFFE9E9EB)
     val reaction: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color.White
+    /** iOS's `inkSecondaryOnBubble`. */
+    val timeOnIncoming: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFFA1A1A8) else Color(0xFF5E5E64)
 }
 
-/** A time label above a block: the time today, else the date and time, in the phone's format. */
-private class ThreadTimes(private val today: DateTimeFormatter, private val other: DateTimeFormatter) {
-    fun label(ts: Long): String {
-        val date = Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault())
-        val now = Instant.now().atZone(ZoneId.systemDefault())
-        return date.format(if (date.toLocalDate() == now.toLocalDate()) today else other)
-    }
+/** A bubble's time ("9:41", decision A16: the phone's 12/24-hour setting) and a day chip's words, in the phone's formats. */
+private class ThreadTimes(private val clock: DateTimeFormatter, private val days: Timeline.DayFormats) {
+    fun clock(ts: Long): String = Instant.ofEpochMilli(ts).atZone(ZoneId.systemDefault()).format(clock)
+    fun day(ts: Long) = Timeline.dayLabel(ts, System.currentTimeMillis(), ZoneId.systemDefault(), days)
 }
 
 @Composable
@@ -791,7 +961,8 @@ private fun rememberThreadTimes(): ThreadTimes {
     val locale = LocalConfiguration.current.locales[0]
     val h24 = DateFormat.is24HourFormat(context)
     return remember(locale, h24) {
-        fun best(skeleton: String) = DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, skeleton), locale)
-        ThreadTimes(best(if (h24) "Hm" else "hm"), best(if (h24) "dMMMHm" else "dMMMhm"))
+        fun best(skeleton: String) = DateFormat.getBestDateTimePattern(locale, skeleton)
+        ThreadTimes(DateTimeFormatter.ofPattern(best(if (h24) "Hm" else "hm"), locale),
+            Timeline.DayFormats(best("EEEE"), best("EEEdMMM"), best("EEEdMMMy"), locale))
     }
 }

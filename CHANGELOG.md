@@ -54,3 +54,10 @@ What changes for people who use the app, in plain words. The format is
   "Reacted 😂 to your message", as in Instagram. Reactions don't send a notification.
 - Photos and videos taken with Instagram's own camera in a chat show as photos and videos when they're kept in the
   chat.
+- Every message shows its time in the bubble, and each day starts with a chip ("Today", "Yesterday", "Mon 3 Nov").
+  While you scroll, the day floats at the top and goes a second after you stop.
+- With TalkBack, each message says who sent it and when.
+- Links in messages, yours and theirs, are underlined and open when tapped. Touching and holding a message with a link
+  still opens its menu, and with TalkBack each link is one of the message's actions.
+- Reactions hang a little lower, so the message's time stays readable, and a row of reactions wider than a short
+  message of yours no longer moves the message out of line.

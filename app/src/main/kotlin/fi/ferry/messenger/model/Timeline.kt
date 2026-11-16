@@ -619,12 +619,20 @@ object Timeline {
      * sender instead ("From Theo Park, …"). The iOS app's `MessageRow.spoken` and `SpokenSender`.
      */
     fun spokenLabel(row: Row, text: String, clock: String, ownName: String?, senderName: String): String {
+        val who = spokenSender(row, ownName, senderName) ?: return "$text, $clock"
+        return if (row.groupSender != null) "$who, $text, $clock" else "$who: $text, $clock"
+    }
+
+    /**
+     * `spokenLabel`'s sender alone ("From Kivo", "You"), null where it names none: for a card, which says what it is
+     * and its time itself (Android's: TalkBack joins the bubble's words and the card's, "From Kivo, Photo, 9:41").
+     */
+    fun spokenSender(row: Row, ownName: String?, senderName: String): String? {
         val message = row.message
-        if (row.groupSender != null) return if (message.kind != MessageKind.Unsent) "From $senderName, $text, $clock" else "$text, $clock"
-        if (row.position != GroupPosition.SINGLE && row.position != GroupPosition.FIRST) return "$text, $clock"
-        val who = if (message.isOwn) (if (row.startsDay) "From you, as ${ownName ?: "you"}" else "You")
+        if (row.groupSender != null) return if (message.kind != MessageKind.Unsent) "From $senderName" else null
+        if (row.position != GroupPosition.SINGLE && row.position != GroupPosition.FIRST) return null
+        return if (message.isOwn) (if (row.startsDay) "From you, as ${ownName ?: "you"}" else "You")
         else if (row.startsDay) "From $senderName" else senderName
-        return "$who: $text, $clock"
     }
 
     private fun group(reactions: Collection<Event>, position: Map<String, Int>, me: String): List<Message.Reaction> {
