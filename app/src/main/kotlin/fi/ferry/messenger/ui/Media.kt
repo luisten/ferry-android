@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -163,32 +164,32 @@ private fun fetch(url: String, mimetype: String?, room: Room, failed: () -> Unit
 
 /**
  * DESIGN §6.3–6.8: the card for a message's media; the one-line placeholder for what has none to show. `time` (iOS 1.7):
- * on a dark capsule in the card's corner; a voice note has it under its length, clear of the bars.
+ * on a dark capsule in a picture's corner, and beside a card's own words where they reach the bottom (a placeholder's
+ * label, a post's caption, a pile's count, a voice note's length), never over them (A35).
  */
 @Composable
-fun MediaBubble(message: Message, kind: MessageKind, time: String?, placeholder: @Composable () -> Unit) {
+fun MediaBubble(message: Message, kind: MessageKind, time: String?, placeholder: @Composable (time: String?) -> Unit) {
     val media = MediaInfo(message.content)
     // Instagram reports no upload progress: a spinner until it answers.
     val uploading = message.isLocalEcho && message.status == Message.Status.Sending
-    val voice = media.album.size < 2 && (kind == MessageKind.Voice || kind == MessageKind.Audio) && media.url != null
-    if (voice) return VoiceBubble(message, media, time)
-    Box {
-        MediaCard(message, kind, media, uploading, placeholder)
-        time?.let { CardTime(it, Modifier.align(Alignment.BottomEnd), spoken = true) }
+    when {
+        media.album.size >= 2 -> AlbumPile(message, media, time)
+        kind == MessageKind.Voice || kind == MessageKind.Audio -> if (media.url != null) VoiceBubble(message, media, time) else placeholder(time)
+        (kind == MessageKind.Image || kind == MessageKind.Gif || kind == MessageKind.Sticker) && media.url != null ->
+            Timed(time) { PhotoCard(message.id, media, sticker = kind == MessageKind.Sticker, tapHere = true, uploading = uploading) }
+        kind == MessageKind.Video && media.url != null -> Timed(time) { VideoCard(message, media, share = null, tapHere = true, uploading = uploading) }
+        kind is MessageKind.Share && kind.type == ShareType.POST && media.url != null -> PostCard(message, media, time)
+        kind is MessageKind.Share && (kind.type == ShareType.REEL || kind.type == ShareType.STORY) -> Timed(time) { VideoCard(message, media, kind, tapHere = true) }
+        else -> placeholder(time) // view once, files, other shares, the mailbox's copies before the thread is read
     }
 }
 
+/** A picture with the time in its bottom end corner. */
 @Composable
-private fun MediaCard(message: Message, kind: MessageKind, media: MediaInfo, uploading: Boolean, placeholder: @Composable () -> Unit) {
-    when {
-        media.album.size >= 2 -> AlbumPile(message, media)
-        kind == MessageKind.Voice || kind == MessageKind.Audio -> placeholder() // no file
-        (kind == MessageKind.Image || kind == MessageKind.Gif || kind == MessageKind.Sticker) && media.url != null ->
-            PhotoCard(message.id, media, sticker = kind == MessageKind.Sticker, tapHere = true, uploading = uploading)
-        kind == MessageKind.Video && media.url != null -> VideoCard(message, media, share = null, tapHere = true, uploading = uploading)
-        kind is MessageKind.Share && kind.type == ShareType.POST && media.url != null -> PostCard(message, media)
-        kind is MessageKind.Share && (kind.type == ShareType.REEL || kind.type == ShareType.STORY) -> VideoCard(message, media, kind, tapHere = true)
-        else -> placeholder() // view once, files, other shares, the mailbox's copies before the thread is read
+private fun Timed(time: String?, card: @Composable () -> Unit) {
+    Box {
+        card()
+        time?.let { CardTime(it, Modifier.align(Alignment.BottomEnd), spoken = true) }
     }
 }
 
@@ -309,14 +310,16 @@ private fun PlayGlyph() {
  * out, one card each, until "Show less".
  */
 @Composable
-private fun AlbumPile(message: Message, media: MediaInfo) {
+private fun AlbumPile(message: Message, media: MediaInfo, time: String?) {
     var open by rememberSaveable(message.id) { mutableStateOf(false) }
     val items = media.album.map(::MediaInfo)
     if (open) {
         OnTap { }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items.forEach { item ->
-                if (item.isVideo) VideoCard(message, item, share = null, tapHere = false) else PhotoCard(message.id, item, sticker = false, tapHere = false)
+            items.forEachIndexed { i, item ->
+                Timed(time.takeIf { i == items.lastIndex }) {
+                    if (item.isVideo) VideoCard(message, item, share = null, tapHere = false) else PhotoCard(message.id, item, sticker = false, tapHere = false)
+                }
             }
             TextButton({ open = false }) { Text("Show less") }
         }
@@ -332,8 +335,15 @@ private fun AlbumPile(message: Message, media: MediaInfo) {
                 Pictures.load(item.previewURL, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             }
         }
-        Text(media.albumLabel, Modifier.align(Alignment.BottomStart).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
-            .padding(horizontal = 10.dp, vertical = 4.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+        // The count and the time share the bottom edge, side by side.
+        Box(Modifier.matchParentSize()) {
+            Row(Modifier.align(Alignment.BottomStart).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(media.albumLabel, Modifier.padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 4.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.weight(1f))
+                time?.let { CardTime(it, Modifier.padding(end = 2.dp), spoken = true) }
+            }
+        }
         // "Share All" under way: the set's downloads so far.
         val downloading = items.mapNotNull { item -> item.url?.let { MediaFiles.progress[it] } }
         if (downloading.isNotEmpty()) Box(Modifier.align(Alignment.Center)) { Overlay(downloading.average().toFloat(), failed = false) }
@@ -445,7 +455,7 @@ private fun Pill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: S
 
 /** DESIGN §6.7: a shared post, 240 wide: who posted it, its picture (between 16:9 and 4:5) and two lines of caption. */
 @Composable
-private fun PostCard(message: Message, media: MediaInfo) {
+private fun PostCard(message: Message, media: MediaInfo, time: String?) {
     val ctx = LocalMedia.current
     val caption = ShareCaption.of(message.content)
     val url = media.url ?: return
@@ -462,9 +472,14 @@ private fun PostCard(message: Message, media: MediaInfo) {
         Box(Modifier.fillMaxWidth().height((240 * ratio).toFloat().dp).background(Color.Black), contentAlignment = Alignment.Center) {
             Pictures.load(url, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             Overlay(MediaFiles.progress[url], failed)
+            if (caption.caption.isNullOrBlank()) time?.let { CardTime(it, Modifier.align(Alignment.BottomEnd), spoken = true) }
         }
         caption.caption?.takeIf { it.isNotBlank() }?.let {
-            Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            // The time beside the caption, not over its end.
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(it, Modifier.weight(1f).padding(12.dp), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                time?.let { t -> CardTime(t, Modifier, spoken = true) }
+            }
         }
     }
 }

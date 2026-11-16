@@ -252,9 +252,9 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     val lineAnchor = rows.indexOfFirst { it.startsUnread }.let { i -> rows.getOrNull(i)?.id to (i > 0) }
     var holdsLine by remember(roomID) { mutableStateOf(unreadAfter != null && lineAnchor.first != null) }
     var revealed by remember(roomID) { mutableStateOf(!holdsLine) }
+    LaunchedEffect(roomID) { if (!revealed) { delay(1_000); revealed = true } }
     LaunchedEffect(roomID, lineAnchor) {
         if (!holdsLine) return@LaunchedEffect
-        launch { delay(1_000); revealed = true }
         snapshotFlow { list.layoutInfo.viewportSize.height }.first { it > 0 }
         val lineRow = rows.indexOfFirst { it.startsUnread }
         val line = rows.size - 1 - lineRow + if (typing) 1 else 0 // reversed: index 0 is the newest, at the bottom
@@ -266,9 +266,11 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
         // Reversed, offsets count up from the bottom: the line's top edge goes to the top, less the last message read.
         if (lineItem != null) list.scrollBy(-(info.viewportEndOffset - context - (lineItem.offset + lineItem.size)).toFloat())
         val below = -list.scrollBy(-1e7f) // what's under the screen there (it ends at the end)
-        // The first row loaded is already unread: the last message read is still to come with a page, so hold on.
-        if (below - context > viewport / 4 || lineRow == 0 && !room.reachedStart) list.scrollBy(below) else holdsLine = false
-        revealed = true
+        // The first row loaded is already unread: the last message read is still to come with a page, so hold on, and
+        // stay hidden (up to the second) rather than show the line moving as the pages land.
+        val waiting = lineRow == 0 && !room.reachedStart
+        if (below - context > viewport / 4 || waiting) list.scrollBy(below) else holdsLine = false
+        if (!waiting) revealed = true
     }
     LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) holdsLine = false } }
     // A new message while at the end, or our own sent from here: follow it. Ours from Instagram's app arrives as an
@@ -586,7 +588,7 @@ private fun MessageRow(
 private fun JumpButton(count: Int, jump: () -> Unit) {
     Row(
         Modifier.heightIn(min = 44.dp).widthIn(min = 44.dp).shadow(4.dp, CircleShape).clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surface).clickable(onClick = jump)
+            .background(Bubbles.raised).clickable(onClick = jump)
             .semantics(mergeDescendants = true) {
                 contentDescription = "Jump to newest message"
                 if (count > 0) stateDescription = if (count == 1) "1 new message" else "$count new messages"
@@ -606,10 +608,10 @@ private fun DayChip(text: String) {
     Box(Modifier.fillMaxWidth().padding(bottom = 12.dp), contentAlignment = Alignment.Center) { DayCapsule(text, Modifier.semantics { heading() }) }
 }
 
-/** The day chip's capsule (decision A15): the surface with a light shadow, as the jump button; never a bubble's grey. */
+/** The day chip's capsule (decisions A15, A38): raised, with a light shadow, as the jump button; never a bubble's grey. */
 @Composable
 private fun DayCapsule(text: String, modifier: Modifier = Modifier) {
-    Text(text, modifier.shadow(2.dp, CircleShape).clip(CircleShape).background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 5.dp),
+    Text(text, modifier.shadow(2.dp, CircleShape).clip(CircleShape).background(Bubbles.raised).padding(horizontal = 12.dp, vertical = 5.dp),
         style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
 }
 
@@ -715,7 +717,7 @@ private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color,
         MessageKind.Text, MessageKind.Notice -> TextBubble(message.body, shape, fill, text, own, time.orEmpty())
         MessageKind.Link -> LinkBubble(message, shape, fill, text, time.orEmpty())
         // ponytail: a labelled card until A6 shows the media itself (photos, videos, voice, GIFs, shares).
-        else -> MediaBubble(message, kind, time) { MediaPlaceholder(kind, message, shape, fill, text) }
+        else -> MediaBubble(message, kind, time) { MediaPlaceholder(kind, message, shape, fill, text, it) }
     }
 }
 
@@ -751,10 +753,11 @@ private fun LinkedText(body: String, time: String?, modifier: Modifier, color: C
     val touches = if (links.isEmpty() || tap == null) Modifier else Modifier.pointerInput(links) {
         fun linkAt(at: Offset): Links.Link? {
             val l = layout.value ?: return null
-            val line = l.getLineForVerticalPosition(at.y)
-            if (at.x < l.getLineLeft(line) || at.x > l.getLineRight(line)) return null // past the line's end
+            // A cursor position: the right half of a letter answers the offset after it. The letter is the one on
+            // either side whose box holds the touch (none past a line's end).
             val i = l.getOffsetForPosition(at)
-            return links.firstOrNull { i in it.range }
+            val letter = listOf(i - 1, i).firstOrNull { it in body.indices && l.getBoundingBox(it).contains(at) } ?: return null
+            return links.firstOrNull { letter in it.range }
         }
         detectTapGestures(
             onDoubleTap = { tap.heart?.invoke() },
@@ -793,13 +796,17 @@ private fun LinkBubble(message: Message, shape: RoundedCornerShape, fill: Color,
                         Pictures.load(url, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                     }
                 }
-                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
-                    Text(parseURL(preview.url)?.host ?: preview.url, style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f))
+                // The time beside the title and the site, never over them (at any font size).
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Column(Modifier.weight(1f).padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        preview.title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = text, maxLines = 2) }
+                        Text(parseURL(preview.url)?.host ?: preview.url, style = MaterialTheme.typography.labelMedium, color = text.copy(alpha = 0.75f),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    CardTime(time, Modifier, spoken = false)
                 }
             }
         }
-        CardTime(time, Modifier.align(Alignment.BottomEnd), spoken = false)
     }
 }
 
@@ -830,13 +837,16 @@ private fun TextBubble(body: String, shape: RoundedCornerShape, fill: Color, tex
 }
 
 @Composable
-private fun MediaPlaceholder(kind: MessageKind, message: Message, shape: RoundedCornerShape, fill: Color, text: Color) {
+private fun MediaPlaceholder(kind: MessageKind, message: Message, shape: RoundedCornerShape, fill: Color, text: Color, time: String?) {
     val media = kind.media ?: return
     val author = (kind as? MessageKind.Share)?.let { ShareCaption.of(message.content).author }
     Row(Modifier.background(fill, shape).padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(Icons.of(media.glyph), null, Modifier.size(20.dp), tint = text)
         Text(media.label + (author?.let { " · @$it" } ?: ""), style = MaterialTheme.typography.bodyMedium, color = text)
+        // The time after the label, as in a text bubble (a capsule would cover the label).
+        time?.let { Text(it, style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+            color = if (message.isOwn) Color.White.copy(alpha = 0.8f) else Bubbles.timeOnIncoming) }
     }
 }
 
@@ -948,6 +958,11 @@ private fun TypingBubble(modifier: Modifier) {
 object Bubbles {
     val incoming: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF262629) else Color(0xFFE9E9EB)
     val reaction: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF2C2C2E) else Color.White
+    /**
+     * What floats over the thread (a day chip, the jump button): the surface in light; in dark a grey lighter than an
+     * incoming bubble, since neither black nor a shadow shows on black (decision A38). Never an account's colour.
+     */
+    val raised: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF3A3A3C) else Color.White
     /** iOS's `inkSecondaryOnBubble`. */
     val timeOnIncoming: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFFA1A1A8) else Color(0xFF5E5E64)
 }
