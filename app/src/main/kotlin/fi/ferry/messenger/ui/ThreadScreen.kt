@@ -46,6 +46,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -117,11 +120,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -204,7 +205,8 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     var reactionsOf by remember { mutableStateOf<Message?>(null) }
     var info by remember(roomID) { mutableStateOf(false) }
     var person by remember { mutableStateOf<String?>(null) }
-    var draft by rememberSaveable(roomID, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    // TextFieldState, not a TextFieldValue: only its field takes pasted photos and videos (`contentReceiver`).
+    val draft = rememberSaveable(roomID, saver = TextFieldState.Saver) { TextFieldState() }
     var replyingTo by remember(roomID) { mutableStateOf<Message?>(null) }
     var editing by remember(roomID) { mutableStateOf<Message?>(null) }
     var replyingInstead by remember(roomID) { mutableStateOf(false) }
@@ -212,13 +214,14 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     val items = remember(roomID) { mutableStateListOf<ComposerItem>() }
     val context = LocalContext.current
     /** Each waits as "Preparing…" until `Outgoing` has it ready; one that can't be sent goes, with why. */
-    fun add(uris: List<Uri>) {
+    /** `copy`: pasted, so read at once (`Outgoing.prepare`). */
+    fun add(uris: List<Uri>, copy: Boolean = false) {
         val left = MAX_ATTACHMENTS - items.size
         if (uris.size > left) AppModel.actionError = "You can send up to $MAX_ATTACHMENTS photos and videos at a time."
         for (uri in uris.take(max(left, 0))) {
             val item = ComposerItem(nextItemID++, context.contentResolver.getType(uri)?.startsWith("video/") == true)
             items += item
-            Outgoing.prepare(context, uri, wanted = { items.any { it.id == item.id } }) { result ->
+            Outgoing.prepare(context, uri, wanted = { items.any { it.id == item.id } }, copy = copy) { result ->
                 val i = items.indexOfFirst { it.id == item.id }
                 if (i < 0) { result.getOrNull()?.file?.delete(); return@prepare } // removed meanwhile
                 result.onSuccess { items[i] = item.copy(ready = it) }
@@ -246,7 +249,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     val actions = MessageActions(
         react = { key, message -> AppModel.react(key, message, room) },
         reply = { editing = null; replyingTo = it },
-        edit = { replyingTo = null; editing = it; draft = TextFieldValue(it.body, TextRange(it.body.length)) },
+        edit = { replyingTo = null; editing = it; draft.setTextAndPlaceCursorAtEnd(it.body) },
         unsend = { AppModel.unsend(it, room) },
         retry = { AppModel.retry(it, room) },
         discard = { AppModel.discard(it, room) },
@@ -265,7 +268,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
         },
     )
     fun send() {
-        val text = draft.text.trim()
+        val text = draft.text.toString().trim()
         val media = items.mapNotNull { it.ready }
         if (media.size < items.size) return // one is still being prepared
         if (text.isEmpty() && media.isEmpty() || text.length > Timeline.MAX_TEXT_LENGTH) return
@@ -280,7 +283,7 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
             items.clear()
             if (text.isNotEmpty()) AppModel.send(text, replyingTo?.eventID, room)
         }
-        draft = TextFieldValue()
+        draft.clearText()
         replyingTo = null
         editing = null
     }
@@ -371,20 +374,20 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                     accept = { AppModel.accept(room) }, delete = { confirmingDelete = true }, replyInstead = { replyingInstead = true })
             } else {
                 Composer(
-                    draft, { draft = it }, identity, login,
+                    draft, identity, login,
                     mode = editing?.let { ComposerMode.Editing }
                         ?: replyingTo?.let { ComposerMode.Replying(people.firstName(it.sender), it.kind.media?.label ?: it.body) }
                         ?: ComposerMode.AcceptsRequest.takeIf { bar == Inbox.ThreadBar.REPLY_ACCEPTS },
                     cancel = {
-                        if (editing != null) draft = TextFieldValue()
-                        if (replyingTo == null && editing == null) { replyingInstead = false; draft = TextFieldValue() } // back to the request bar
+                        if (editing != null) draft.clearText()
+                        if (replyingTo == null && editing == null) { replyingInstead = false; draft.clearText() } // back to the request bar
                         replyingTo = null
                         editing = null
                     },
                     send = ::send,
                     focus = focus,
                     items = items,
-                    attach = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) AttachActions(library = ::library) else null,
+                    attach = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) AttachActions(library = ::library, paste = { add(it, copy = true) }) else null,
                     removeAttachment = ::removeItem,
                     sendVoice = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) {
                         { note -> AppModel.sendMedia(note, replyingTo?.eventID, room); replyingTo = null }

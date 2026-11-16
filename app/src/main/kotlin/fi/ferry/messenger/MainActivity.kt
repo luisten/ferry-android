@@ -1,7 +1,10 @@
 package fi.ferry.messenger
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.content.FileProvider
 import fi.ferry.messenger.ui.AccountScreen
 import fi.ferry.messenger.ui.AccountsSheet
 import fi.ferry.messenger.ui.FerryTheme
@@ -23,6 +27,7 @@ import fi.ferry.messenger.ui.NotificationsPrompt
 import fi.ferry.messenger.ui.ReloginDialog
 import fi.ferry.messenger.ui.ThreadScreen
 import fi.ferry.messenger.ui.Welcome
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -39,7 +44,8 @@ class MainActivity : ComponentActivity() {
         // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska;
         // `--ez incoming true` and `--ez reaction true` bring a message and a reaction 10 s in, `--ez busy true` many
         // new messages in Harbor Coffee, `--ei group_older <n>` has the group page back from five messages (n pages
-        // of 20 made-up ones after its own), `--ei group_extra <n>` adds n unread messages to the group (see `Demo`).
+        // of 20 made-up ones after its own), `--ei group_extra <n>` adds n unread messages to the group (see `Demo`),
+        // `--ez clipboard true` puts two photos on the clipboard to paste into a chat's field (iOS 1.7's paste).
         val demo = debuggable && intent.getBooleanExtra("demo", false)
         AppModel.start(applicationContext, demo, requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable },
             demoSignedOut = demo && intent.getBooleanExtra("signed_out", false),
@@ -52,7 +58,20 @@ class MainActivity : ComponentActivity() {
             demoGroupExtra = if (demo) intent.getIntExtra("group_extra", 0) else 0)
         AppModel.openRoom = intent.getStringExtra(OPEN_ROOM)
         if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
+        if (demo && intent.getBooleanExtra("clipboard", false)) demoClipboard()
         setContent { FerryTheme { App() } }
+    }
+
+    /** Two made-up 600 × 400 photos, one colour each, in the outgoing folder and on the clipboard as one clip. */
+    private fun demoClipboard() {
+        val uris = listOf(0xFF2F80ED.toInt(), 0xFFF2994A.toInt()).mapIndexed { i, colour ->
+            val file = File(File(cacheDir, "outgoing").apply { mkdirs() }, "demo-paste-${i + 1}.jpg")
+            val bitmap = Bitmap.createBitmap(600, 400, Bitmap.Config.ARGB_8888).apply { eraseColor(colour) }
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            FileProvider.getUriForFile(this, "$packageName.files", file)
+        }
+        val clip = ClipData("Demo photos", arrayOf("image/jpeg"), ClipData.Item(uris[0])).apply { addItem(ClipData.Item(uris[1])) }
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
     }
 
     /** A notification tapped while Ferry was open (`singleTop`). */

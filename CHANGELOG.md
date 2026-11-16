@@ -64,5 +64,5 @@ What changes for people who use the app, in plain words. The format is
 - Swipe a message to the right to reply to it.
 - Mark a chat as unread from the chat list: swipe right on it, or touch and hold it. This stays on your phone;
   Instagram's own app still shows the chat as read.
-- Pick several photos and videos at once with +. They're sent one after another, in the order you picked them, and
-  then your text.
+- Pick several photos and videos at once with +, or paste them into the message field. They're sent one after
+  another, in the order you picked them, and then your text.

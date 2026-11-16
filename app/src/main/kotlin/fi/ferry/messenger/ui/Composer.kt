@@ -3,8 +3,10 @@ package fi.ferry.messenger.ui
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -34,7 +36,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -84,7 +92,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -306,8 +313,8 @@ sealed interface ComposerMode {
     data object AcceptsRequest : ComposerMode
 }
 
-/** What "+" offers: the photo picker. */
-class AttachActions(val library: () -> Unit)
+/** What "+" offers: the photo picker. `paste`: photos and videos pasted into the field, or a keyboard's (D5). */
+class AttachActions(val library: () -> Unit, val paste: (List<Uri>) -> Unit)
 
 /**
  * DESIGN §6.9: the account's avatar (the chat is locked to it), the field ("Message as Studio"), and once there's text or
@@ -316,8 +323,7 @@ class AttachActions(val library: () -> Unit)
  */
 @Composable
 fun Composer(
-    draft: TextFieldValue,
-    change: (TextFieldValue) -> Unit,
+    draft: TextFieldState,
     identity: AccountIdentity?,
     login: BridgeAPI.Login?,
     mode: ComposerMode?,
@@ -334,6 +340,7 @@ fun Composer(
 ) {
     val account = identity?.name ?: login?.displayName ?: "this account"
     val count = draft.text.trim().length
+    val context = LocalContext.current
     val fill = identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground
     Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -363,12 +370,17 @@ fun Composer(
                 VoiceRecorder.review?.let { ReviewPlayer(it) } ?: RecordingStrip(sendVoice!!)
             } else Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
                 BasicTextField(
-                    draft, change, Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = "Message, sending as $account" },
+                    draft,
+                    Modifier.fillMaxWidth().focusRequester(focus).then(attach?.let { Modifier.pastes(context, it.paste) } ?: Modifier)
+                        .semantics { contentDescription = "Message, sending as $account" },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onBackground),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground), maxLines = 6,
-                    decorationBox = { field ->
-                        if (draft.text.isEmpty()) Text("Message as $account", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        field()
+                    lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
+                    decorator = { field ->
+                        Box {
+                            if (draft.text.isEmpty()) Text("Message as $account", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            field()
+                        }
                     },
                 )
                 if (count >= 900) {
@@ -521,6 +533,28 @@ private fun ReviewPlayer(note: Attachment) {
         }
         Text(clock(if (playing) position else duration), style = MaterialTheme.typography.labelLarge)
     }
+}
+
+/**
+ * Photos and videos pasted (the field's Paste) or inserted by a keyboard (its clipboard, GIFs, stickers) go to `paste`
+ * (D5); text and anything else goes on into the field. Another app's URIs: content ones only, never a file path, and a
+ * photo or video by their provider's own type.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.pastes(context: Context, paste: (List<Uri>) -> Unit) = contentReceiver { content ->
+    if (!content.hasMediaType(MediaType.Image) && !content.hasMediaType(VIDEO)) return@contentReceiver content
+    val uris = mutableListOf<Uri>()
+    val rest = content.consume { item -> item.uri?.takeIf { isPhotoOrVideo(context, it) }?.also { uris += it } != null }
+    if (uris.isNotEmpty()) paste(uris)
+    rest
+}
+
+private val VIDEO = MediaType("video/*")
+
+private fun isPhotoOrVideo(context: Context, uri: Uri): Boolean {
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+    val type = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: return false
+    return type.startsWith("image/") || type.startsWith("video/")
 }
 
 /** iOS's `maxAttachments`: the photos and videos one Send takes. */
