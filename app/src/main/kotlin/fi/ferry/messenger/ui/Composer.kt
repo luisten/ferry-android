@@ -376,7 +376,11 @@ fun Composer(
             } else Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
                 BasicTextField(
                     draft,
-                    Modifier.fillMaxWidth().focusRequester(focus).then(attach?.let { Modifier.pastes(context, it.paste) } ?: Modifier)
+                    // Always on, so the keyboard is always told the field takes images: added only with "+", it stayed off
+                    // after an Edit (the keyboard reads it when its session starts, R2-F4). Where "+" isn't, a paste says why.
+                    Modifier.fillMaxWidth().focusRequester(focus).pastes(context, attach?.paste ?: { _ ->
+                        AppModel.actionError = if (mode == ComposerMode.Editing) "An edit can only change the text." else "Only text can be sent here."
+                    })
                         .semantics { contentDescription = "Message, sending as $account" },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onBackground),
                     lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
