@@ -11,15 +11,15 @@ Instagram account, and the `.apk` file from the person who invited you. Only ins
 1. Save the `.apk` file on your phone (from a message, a download link or a cloud folder) and open it from the app you
    got it in (your files app, Chrome, a messenger).
 2. Android says that app isn't allowed to install apps. Tap **Settings**, switch on **Allow from this source** (also
-   called "Install unknown apps"), and go back. That allows the one app you opened the file from, nothing else; you can
-   switch it off afterwards.
-3. Tap **Install**. Google Play Protect may say it doesn't know the app or its developer, or offer to scan it. That's
+   called "Install unknown apps"), go back, and tap the file again. That allows the one app you opened the file from,
+   nothing else; you can switch it off afterwards.
+3. Tap **Install** (**Update** when an older Ferry is already on the phone). Google Play Protect may say it doesn't know the app or its developer, or offer to scan it. That's
    expected: the app isn't from Google Play. Choose **Install anyway** (or **Scan**, which is fine too).
 4. Open Ferry Messenger.
 
 ## First start
 
-- Tap through the welcome and log in. **You log in on Instagram's own page inside the app.** Your password goes only to
+- Tap **Connect Instagram account** on the welcome screen and log in. **You log in on Instagram's own page inside the app.** Your password goes only to
   Instagram; Ferry never sees it. Then give the account a name, a colour and a mark, so its chats are easy to tell
   apart. You can add more accounts later.
 - **Notifications:** Ferry stays connected to Instagram in the background to tell you about new messages, and shows a
@@ -33,7 +33,7 @@ Instagram account, and the `.apk` file from the person who invited you. Only ins
 
 Install the new `.apk` the same way, over the old one. Your accounts and chats stay. This works because every version
 is signed with the developer's own key. A build signed with a different key (a test build, say) won't install over it:
-Android will ask you to uninstall first, which signs you out of Ferry, and you log in again.
+uninstall Ferry first, which signs you out, then install and log in again.
 
 To check that your file is the developer's, its signing certificate's SHA-256 fingerprint is
 
