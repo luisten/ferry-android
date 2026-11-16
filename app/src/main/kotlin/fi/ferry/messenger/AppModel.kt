@@ -134,6 +134,9 @@ object AppModel {
     private var markedUnread = setOf<String>()
     /** Our photos, GIFs, videos and voice notes on their way or failed, by transaction ID: Retry sends the same file. */
     private val outgoing = mutableMapOf<String, Attachment>()
+    /** Each chat's sends, one after another (decision A12). */
+    private val sends = SendQueue()
+    private var demoSends = 0
     private var started = false
     private lateinit var appContext: Context
     /** Messages from before this process aren't news: they were there at launch, or came with history. */
@@ -378,16 +381,28 @@ object AppModel {
     }
 
     private fun deliver(pending: PendingMessage, room: Room) {
-        if (demo || room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
+        if (room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
         val text = Timeline.body(pending.content).encodeToByteArray()
         val replyTo = Timeline.replyTarget(pending.content).orEmpty().encodeToByteArray()
-        thread {
+        enqueue(room, pending) {
             val answer = IGCore.send(room.id.encodeToByteArray(), text, replyTo, pending.txnID.encodeToByteArray())?.decodeToString()
             val failure = failure(answer)
             val id = answer?.let { runCatching { json.decodeFromString<IG.Result>(it).id }.getOrNull() }
-            main.post {
-                update(room, pending.txnID, if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(id ?: pending.txnID))
-            }
+            if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(id ?: pending.txnID)
+        }
+    }
+
+    /**
+     * On the chat's send line (`SendQueue`, decision A12), after everything sent there before it: its answer ends the
+     * local echo's "Sending". The demo sends nothing, but takes a moment for each, so the order shows.
+     */
+    private fun enqueue(room: Room, pending: PendingMessage, upload: () -> PendingMessage.State) {
+        sends.submit(room.id) {
+            val state = if (demo) {
+                Thread.sleep(DEMO_SEND_MS)
+                PendingMessage.State.Failed("This is the demo: nothing is sent.")
+            } else runCatching(upload).getOrElse { PendingMessage.State.Failed("The engine returned nothing.") }
+            main.post { update(room, pending.txnID, state) }
         }
     }
 
@@ -465,7 +480,8 @@ object AppModel {
     private fun failure(answer: String?): String? =
         if (answer == null) "The engine returned nothing." else runCatching { json.decodeFromString<Failure>(answer).error }.getOrNull()
 
-    private fun newOTID(): String = if (demo) "demo-${now()}" else IGCore.newOTID()?.decodeToString().orEmpty()
+    // The demo's own: several sends in the same millisecond (a set) each need theirs.
+    private fun newOTID(): String = if (demo) "demo-${now()}-${++demoSends}" else IGCore.newOTID()?.decodeToString().orEmpty()
 
     // Requests (DESIGN I2/T2)
 
@@ -584,14 +600,14 @@ object AppModel {
 
     private fun deliverMedia(pending: PendingMessage, room: Room) {
         val attachment = outgoing[pending.txnID] ?: return update(room, pending.txnID, PendingMessage.State.Failed("The file is gone. Send it again."))
-        if (demo || room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
+        if (room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
         val voice = pending.content["msgtype"].string == "m.audio"
         val replyTo = Timeline.replyTarget(pending.content).orEmpty()
-        thread {
+        enqueue(room, pending) {
             val answer = IGCore.sendMedia(room.id.encodeToByteArray(), attachment.file.path.encodeToByteArray(), attachment.mimetype.encodeToByteArray(),
                 voice, replyTo.encodeToByteArray(), pending.txnID.encodeToByteArray())?.decodeToString()
             val failure = failure(answer)
-            main.post { update(room, pending.txnID, if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(pending.txnID)) }
+            if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(pending.txnID)
         }
     }
 
@@ -848,4 +864,5 @@ object AppModel {
     private const val MARKED_UNREAD = "markedUnread"
     private const val RECENT_REACTIONS = "reactions.recent"
     private const val LOCAL = "local:"
+    private const val DEMO_SEND_MS = 600L
 }

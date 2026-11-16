@@ -1,5 +1,6 @@
 package fi.ferry.messenger
 
+import android.content.ContentResolver
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -30,6 +31,7 @@ import androidx.media3.transformer.Transformer
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 import kotlin.math.max
 
@@ -52,31 +54,84 @@ class Attachment(
  * Getting a pick ready (the iOS app's PhotoMessage and VideoMessage, with Instagram's limits): photos as JPEG at most
  * 2048 px and 8,000,000 bytes, no metadata copied; GIFs and animated WebPs as they are, cleaned (`MediaClean`), at most
  * 8,000,000; videos through Media3's Transformer with only the orientation kept, as they are up to 25,000,000 bytes,
- * else at 720p, 540p, then 480p.
+ * else at 720p, 540p, then 480p. Picked, pasted or taken with the camera, everything goes this way.
  */
 object Outgoing {
     private const val MAX_IMAGE = 8_000_000L
     private const val MAX_VIDEO = 25_000_000L
     private val main = Handler(Looper.getMainLooper())
+    /** Photos and GIFs one at a time (decision A13): ten 2048 px decodes at once would take ~250 MB. */
+    private val photos = Executors.newSingleThreadExecutor()
+    /** Videos one at a time (D6): phones have few video encoders. Main thread only. */
+    private val videos = ArrayDeque<() -> Unit>()
+    private var videoBusy = false
 
     class Failure(message: String) : Exception(message)
 
     private fun dir(context: Context) = File(context.cacheDir, "outgoing").apply { mkdirs() }
+    private fun cameraDir(context: Context) = File(context.cacheDir, "camera").apply { mkdirs() }
 
-    /** At launch: what a send left behind more than a day ago. */
+    /** At launch: what a send or the camera left behind more than a day ago. */
     fun sweep(context: Context) = thread(isDaemon = true) {
         val day = System.currentTimeMillis() - 24 * 3600_000L
-        dir(context).listFiles()?.filter { it.lastModified() < day }?.forEach { it.delete() }
+        listOf(dir(context), cameraDir(context)).flatMap { it.listFiles().orEmpty().toList() }.filter { it.lastModified() < day }.forEach { it.delete() }
     }
 
-    /** `done` on the main thread with the attachment, or why it can't be sent. */
-    fun prepare(context: Context, uri: Uri, done: (Result<Attachment>) -> Unit) {
-        val type = context.contentResolver.getType(uri).orEmpty()
-        if (type.startsWith("video/")) return video(context.applicationContext, uri, done)
+    /** Where the camera app puts a photo or video for us (lent to it through `FileProvider`, `shared_files.xml`). */
+    fun cameraFile(context: Context, video: Boolean): File = File(cameraDir(context), "camera-${UUID.randomUUID()}.${if (video) "mp4" else "jpg"}")
+
+    /**
+     * `done` on the main thread with the attachment, or why it can't be sent, once its turn came (photos one at a
+     * time, videos one at a time). `wanted`: still in the composer when its turn comes, else it's never prepared.
+     * `copy`: pasted or inserted by the keyboard, so it's read at once, before the paste's read grant can end (decision
+     * A46); the copy goes when it's prepared.
+     */
+    fun prepare(context: Context, uri: Uri, wanted: () -> Boolean = { true }, copy: Boolean = false, done: (Result<Attachment>) -> Unit) {
+        val app = context.applicationContext
+        val type = app.contentResolver.getType(uri).orEmpty()
+        if (!copy) return enqueue(app, uri, type, wanted, done)
         thread {
-            val result = runCatching { image(context, uri, type) }
+            val file = runCatching { copyIn(app, uri, type) }.getOrNull()
+            main.post {
+                if (file == null) done(Result.failure(Failure(if (type.startsWith("video/")) "This video can't be read." else "This photo can't be read.")))
+                else enqueue(app, Uri.fromFile(file), type, wanted) { file.delete(); done(it) }
+            }
+        }
+    }
+
+    /** On the main thread. */
+    private fun enqueue(context: Context, uri: Uri, type: String, wanted: () -> Boolean, done: (Result<Attachment>) -> Unit) {
+        val removed = Result.failure<Attachment>(Failure("Removed."))
+        if (type.startsWith("video/")) {
+            videos += {
+                val finish = { result: Result<Attachment> -> videoBusy = false; done(result); nextVideo() }
+                if (wanted()) video(context, uri, type, finish) else finish(removed)
+            }
+            nextVideo()
+        } else photos.execute {
+            val result = if (wanted()) runCatching { image(context, uri, type) } else removed
             main.post { done(result) }
         }
+    }
+
+    private fun nextVideo() {
+        if (videoBusy) return
+        val job = videos.removeFirstOrNull() ?: return
+        videoBusy = true
+        job()
+    }
+
+    /** A pasted photo or video into our own folder. Only another app's content, never a file path. */
+    private fun copyIn(context: Context, uri: Uri, type: String): File {
+        require(uri.scheme == ContentResolver.SCHEME_CONTENT)
+        val file = File(dir(context), "in-${UUID.randomUUID()}.${MediaFiles.extension(type)}")
+        try {
+            context.contentResolver.openInputStream(uri)!!.use { input -> file.outputStream().use { input.copyTo(it) } }
+        } catch (e: Exception) {
+            file.delete()
+            throw e
+        }
+        return file
     }
 
     private fun image(context: Context, uri: Uri, type: String): Attachment {
@@ -137,7 +192,7 @@ object Outgoing {
         return if (longest <= max) bitmap else Bitmap.createScaledBitmap(bitmap, bitmap.width * max / longest, bitmap.height * max / longest, true)
     }
 
-    private fun video(context: Context, uri: Uri, done: (Result<Attachment>) -> Unit) {
+    private fun video(context: Context, uri: Uri, type: String, done: (Result<Attachment>) -> Unit) {
         thread {
             val about = runCatching {
                 MediaMetadataRetriever().use { r ->
@@ -152,7 +207,6 @@ object Outgoing {
                 }
             }.getOrNull()
             val size = runCatching { context.contentResolver.openFileDescriptor(uri, "r")!!.use { it.statSize } }.getOrDefault(-1L)
-            val type = context.contentResolver.getType(uri)
             main.post {
                 if (about == null) return@post done(Result.failure(Failure("This video can't be read.")))
                 // As it is when it's small enough (the metadata still goes), else smaller and smaller.

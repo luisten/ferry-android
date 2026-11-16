@@ -1,6 +1,7 @@
 package fi.ferry.messenger.ui
 
 import android.icu.lang.UCharacter
+import android.net.Uri
 import android.icu.lang.UProperty
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
@@ -66,6 +67,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -163,6 +165,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** The composer's items' IDs, this process's (main thread). */
+private var nextItemID = 0L
+
 /** DESIGN §6.1 groups: the sender's 28 dp avatar beside the last bubble of a run, and the indent it leaves. */
 private val GROUP_AVATAR = 28.dp
 private val GROUP_INDENT = GROUP_AVATAR + 6.dp
@@ -203,18 +208,36 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     var replyingTo by remember(roomID) { mutableStateOf<Message?>(null) }
     var editing by remember(roomID) { mutableStateOf<Message?>(null) }
     var replyingInstead by remember(roomID) { mutableStateOf(false) }
-    var attachment by remember(roomID) { mutableStateOf<AttachmentState?>(null) }
+    // Photos and videos waiting above the field, in the order they go (iOS 1.7: up to 10). Not kept past the thread.
+    val items = remember(roomID) { mutableStateListOf<ComposerItem>() }
     val context = LocalContext.current
-    // Android's photo picker: no permission, only what's picked (DESIGN §6.9: photos and videos, no camera).
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val preparing = AttachmentState.Preparing(if (context.contentResolver.getType(uri)?.startsWith("video/") == true) "video" else "photo")
-        attachment = preparing
-        Outgoing.prepare(context, uri) { result ->
-            if (attachment !== preparing) return@prepare // removed meanwhile
-            attachment = result.getOrNull()?.let { AttachmentState.Ready(it) }
-            result.exceptionOrNull()?.let { AppModel.actionError = it.message ?: "This can't be sent." }
+    /** Each waits as "Preparing…" until `Outgoing` has it ready; one that can't be sent goes, with why. */
+    fun add(uris: List<Uri>) {
+        val left = MAX_ATTACHMENTS - items.size
+        if (uris.size > left) AppModel.actionError = "You can send up to $MAX_ATTACHMENTS photos and videos at a time."
+        for (uri in uris.take(max(left, 0))) {
+            val item = ComposerItem(nextItemID++, context.contentResolver.getType(uri)?.startsWith("video/") == true)
+            items += item
+            Outgoing.prepare(context, uri, wanted = { items.any { it.id == item.id } }) { result ->
+                val i = items.indexOfFirst { it.id == item.id }
+                if (i < 0) { result.getOrNull()?.file?.delete(); return@prepare } // removed meanwhile
+                result.onSuccess { items[i] = item.copy(ready = it) }
+                    .onFailure { items.removeAt(i); AppModel.actionError = it.message ?: "This can't be sent." }
+            }
         }
+    }
+    fun removeItem(id: Long) {
+        items.firstOrNull { it.id == id }?.let { items.remove(it); it.ready?.file?.delete() }
+    }
+    // Android's photo picker: no permission, only what's picked, numbered in the order picked (D7). The several-at-once
+    // picker refuses a limit under two, so the last slot gets the single one (A22).
+    val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let { add(listOf(it)) } }
+    val pickSome = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(MAX_ATTACHMENTS)) { add(it) }
+    fun library() {
+        val left = MAX_ATTACHMENTS - items.size
+        val media = ActivityResultContracts.PickVisualMedia.ImageAndVideo
+        if (left >= 2) pickSome.launch(PickVisualMediaRequest.Builder().setMediaType(media).setMaxItems(left).setOrderedSelection(true).build())
+        else if (left == 1) pickOne.launch(PickVisualMediaRequest(media))
     }
     var confirmingDelete by remember(roomID) { mutableStateOf(false) }
     val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
@@ -243,17 +266,18 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     )
     fun send() {
         val text = draft.text.trim()
-        val media = (attachment as? AttachmentState.Ready)?.attachment
-        if (text.isEmpty() && media == null || text.length > Timeline.MAX_TEXT_LENGTH) return
+        val media = items.mapNotNull { it.ready }
+        if (media.size < items.size) return // one is still being prepared
+        if (text.isEmpty() && media.isEmpty() || text.length > Timeline.MAX_TEXT_LENGTH) return
         val edited = editing
         if (edited != null) {
             if (text.isNotEmpty() && text != edited.body) AppModel.edit(edited, text, room)
         } else {
-            // The media first, then the text as its own message (Instagram drops captions); the reply goes on the text.
-            if (media != null) {
-                AppModel.sendMedia(media, replyingTo?.eventID?.takeIf { text.isEmpty() }, room)
-                attachment = null
-            }
+            // The photos and videos first, one message each in their order (Instagram's web send takes one attachment),
+            // then the text as its own message (Instagram drops captions); the chat's send line keeps that order (A12).
+            // A reply goes with the text when there is one, else with the first.
+            media.forEachIndexed { i, attachment -> AppModel.sendMedia(attachment, replyingTo?.eventID?.takeIf { i == 0 && text.isEmpty() }, room) }
+            items.clear()
             if (text.isNotEmpty()) AppModel.send(text, replyingTo?.eventID, room)
         }
         draft = TextFieldValue()
@@ -328,6 +352,9 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
         onDispose {
             if (AppModel.visibleRoom == roomID) AppModel.visibleRoom = null
             AppModel.setTyping(false, room); VoicePlayer.stop(); VoiceRecorder.cancel()
+            // What waited above the field goes with the thread (one still being prepared is dropped when it's done).
+            items.forEach { it.ready?.file?.delete() }
+            items.clear()
         }
     }
     var viewer by remember { mutableStateOf<Viewer?>(null) }
@@ -356,11 +383,9 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                     },
                     send = ::send,
                     focus = focus,
-                    attachment = attachment,
-                    attach = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) {
-                        { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
-                    } else null,
-                    removeAttachment = { attachment = null },
+                    items = items,
+                    attach = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) AttachActions(library = ::library) else null,
+                    removeAttachment = ::removeItem,
                     sendVoice = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) {
                         { note -> AppModel.sendMedia(note, replyingTo?.eventID, room); replyingTo = null }
                     } else null,

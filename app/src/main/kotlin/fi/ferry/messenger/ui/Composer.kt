@@ -30,6 +30,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -51,6 +53,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +74,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
@@ -81,6 +85,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -301,9 +306,13 @@ sealed interface ComposerMode {
     data object AcceptsRequest : ComposerMode
 }
 
+/** What "+" offers: the photo picker. */
+class AttachActions(val library: () -> Unit)
+
 /**
- * DESIGN §6.9: the account's avatar (the chat is locked to it), the field ("Message as Studio"), and once there's text a
- * send button in the account's colour. A counter from 900 characters; past 1000 (Instagram's limit) Send is off.
+ * DESIGN §6.9: the account's avatar (the chat is locked to it), the field ("Message as Studio"), and once there's text or
+ * a photo a send button in the account's colour. A counter from 900 characters; past 1000 (Instagram's limit) Send is
+ * off, and while a photo or video is still being prepared.
  */
 @Composable
 fun Composer(
@@ -315,16 +324,16 @@ fun Composer(
     cancel: () -> Unit,
     send: () -> Unit,
     focus: FocusRequester,
-    attachment: AttachmentState? = null,
-    /** The photo picker; null where there are no attachments (editing, a request, a reply that accepts one). */
-    attach: (() -> Unit)? = null,
-    removeAttachment: () -> Unit = {},
+    /** Photos and videos waiting above the field, in the order they go. */
+    items: List<ComposerItem> = emptyList(),
+    /** "+"; null where there are no attachments (editing, a request, a reply that accepts one). */
+    attach: AttachActions? = null,
+    removeAttachment: (Long) -> Unit = {},
     /** A recorded voice note to send; null where there are none (as for attachments). */
     sendVoice: ((Attachment) -> Unit)? = null,
 ) {
     val account = identity?.name ?: login?.displayName ?: "this account"
     val count = draft.text.trim().length
-    val ready = attachment is AttachmentState.Ready
     val fill = identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground
     Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -334,14 +343,12 @@ fun Composer(
             ComposerMode.AcceptsRequest -> ModeBar(Icons.check, "Replying accepts the request.", null, cancel)
             null -> {}
         }
-        attachment?.let { AttachmentBar(it, removeAttachment) }
+        if (items.size == 1) AttachmentBar(items[0], typed = count > 0) { removeAttachment(items[0].id) }
+        else if (items.size > 1) SetBar(items, typed = count > 0, removeAttachment)
         val recording = (VoiceRecorder.recording || VoiceRecorder.review != null) && sendVoice != null
         // As iOS: "+" in its own circle left of the field.
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (!recording) attach?.let {
-            Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClickLabel = "Photo or video", onClick = it),
-                contentAlignment = Alignment.Center) { Icon(Icons.add, "Photo or video", tint = MaterialTheme.colorScheme.onBackground) }
-        }
+        if (!recording) attach?.let { PlusButton(it, enabled = items.size < MAX_ATTACHMENTS) }
         Row(
             Modifier.weight(1f).heightIn(min = 44.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
                 .padding(start = 8.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
@@ -370,10 +377,10 @@ fun Composer(
                         style = MaterialTheme.typography.labelSmall, color = if (over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (count == 0 && attachment == null && sendVoice != null) {
+            if (count == 0 && items.isEmpty() && sendVoice != null) {
                 MicButton(sendVoice)
-            } else if (count > 0 || ready) {
-                val enabled = count <= Timeline.MAX_TEXT_LENGTH && attachment !is AttachmentState.Preparing
+            } else if (count > 0 || items.isNotEmpty()) {
+                val enabled = count <= Timeline.MAX_TEXT_LENGTH && items.all { it.ready != null }
                 IconButton(send, Modifier.size(40.dp), enabled = enabled) {
                     Box(Modifier.size(32.dp).background(fill.copy(alpha = if (enabled) 1f else 0.4f), CircleShape), contentAlignment = Alignment.Center) {
                         Icon(if (mode == ComposerMode.Editing) Icons.check else Icons.send, if (mode == ComposerMode.Editing) "Save edit" else "Send",
@@ -516,34 +523,91 @@ private fun ReviewPlayer(note: Attachment) {
     }
 }
 
-/** A pick on its way into the composer: being prepared (`Outgoing`), or ready to send. */
-sealed interface AttachmentState {
-    data class Preparing(val what: String) : AttachmentState
-    data class Ready(val attachment: Attachment) : AttachmentState
+/** iOS's `maxAttachments`: the photos and videos one Send takes. */
+const val MAX_ATTACHMENTS = 10
+
+/** A photo or video waiting above the field (iOS's `ComposerItem`): being prepared (`Outgoing`) until it's `ready`. */
+data class ComposerItem(val id: Long, val video: Boolean, val ready: Attachment? = null)
+
+/** "+" in its own circle (as iOS), the photo picker; off at 10 waiting. */
+@Composable
+private fun PlusButton(attach: AttachActions, enabled: Boolean) {
+    val ink = MaterialTheme.colorScheme.onBackground
+    Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
+        .clickable(enabled = enabled, onClickLabel = "Add photos or videos", onClick = attach.library), contentAlignment = Alignment.Center) {
+        Icon(Icons.add, "Add photos or videos", tint = if (enabled) ink else ink.copy(alpha = 0.38f))
+    }
 }
 
-/** DESIGN §6.9's attachment bar: the pick, what it is, that a caption goes on its own (Instagram drops them), and ✕. */
+/** DESIGN §6.9's attachment bar: the pick, what it is, that typed text goes on its own (Instagram drops captions), and ✕. */
 @Composable
-private fun AttachmentBar(state: AttachmentState, remove: () -> Unit) {
-    val ready = (state as? AttachmentState.Ready)?.attachment
+private fun AttachmentBar(item: ComposerItem, typed: Boolean, remove: () -> Unit) {
+    val ready = item.ready
     val title = when {
-        ready == null -> "Preparing ${(state as AttachmentState.Preparing).what}…"
+        ready == null -> if (item.video) "Preparing video…" else "Preparing photo…"
         ready.kind == Attachment.Kind.VIDEO -> "Video" + (ready.duration?.let { " · ${clock(it)}" } ?: "")
         ready.kind == Attachment.Kind.GIF -> "GIF"
         else -> "Photo"
     }
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).padding(start = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.padding(vertical = 8.dp).size(44.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.background),
-            contentAlignment = Alignment.Center) {
-            ready?.preview?.let { Image(it, null, Modifier.size(44.dp), contentScale = ContentScale.Crop) }
-                ?: CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        }
+        Thumbnail(item, 44.dp, Modifier.padding(vertical = 8.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            Text("Your text is sent as a separate message.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (ready != null && typed) {
+                Text("Your text is sent as a separate message.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        IconButton(remove) { Icon(Icons.close, "Remove") }
+        IconButton(remove) { Icon(Icons.close, if (item.video) "Remove video" else "Remove photo") }
+    }
+}
+
+/** iOS 1.7's set: two or more waiting, each with its ✕. They go one after another, in this order, then the text. */
+@Composable
+private fun SetBar(items: List<ComposerItem>, typed: Boolean, remove: (Long) -> Unit) {
+    val videos = items.count { it.video }
+    val photos = items.size - videos
+    val title = listOfNotNull(
+        "$photos photo${if (photos == 1) "" else "s"}".takeIf { photos > 0 },
+        "$videos video${if (videos == 1) "" else "s"}".takeIf { videos > 0 },
+    ).joinToString(", ")
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(if (typed && items.all { it.ready != null }) "Each is sent on its own, then your text." else "Each is sent on its own, in this order.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items.forEachIndexed { i, item ->
+                key(item.id) {
+                    Box {
+                        Thumbnail(item, 56.dp)
+                        Box(Modifier.align(Alignment.TopEnd).size(28.dp).clickable(role = Role.Button) { remove(item.id) }
+                            .semantics { contentDescription = "Remove ${if (item.video) "video" else "photo"} ${i + 1}" },
+                            contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(20.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(Icons.close, null, Modifier.size(14.dp), tint = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The pick's picture (a video's with ▶), or a spinner while it's prepared. */
+@Composable
+private fun Thumbnail(item: ComposerItem, size: Dp, modifier: Modifier = Modifier) {
+    Box(modifier.size(size).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+        val preview = item.ready?.preview
+        if (preview != null) {
+            Image(preview, null, Modifier.size(size), contentScale = ContentScale.Crop)
+            if (item.video) Icon(Icons.play, null, Modifier.size(16.dp), tint = Color.White)
+        } else if (item.ready == null) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
     }
 }
 
