@@ -51,7 +51,7 @@ object Demo {
 
     private val chats = listOf(
         Chat("Noor Haddad", "noor.haddad", "17841400000000201", TAMO, 1, listOf(
-            Line(false, 26, "Are we still on for Sunday?"), Line(true, 25, "Yes! Brunch at 11?"), Line(false, 4, "Perfect, I'll book a table"))),
+            Line(false, 26, "Are we still on for Sunday?"), Line(true, 10, "Yes! Brunch at 11?") /* within Edit's 15 minutes */, Line(false, 4, "Perfect, I'll book a table"))),
         Chat("Harbor Coffee", "harborcoffee", "17841400000000202", KIVO, 2, listOf(
             Line(false, 95, "Hi! Could we book the studio for a product shoot?"), Line(true, 90, "Of course. Which day works for you?"),
             Line(false, 41, "Next Thursday, around 9?"), Line(false, 40, "We'd bring our own props"))),

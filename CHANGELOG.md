@@ -66,3 +66,4 @@ What changes for people who use the app, in plain words. The format is
   Instagram's own app still shows the chat as read.
 - Pick several photos and videos at once with +, or paste them into the message field. They're sent one after
   another, in the order you picked them, and then your text.
+- Take a photo or record a video with the camera straight from + in a chat.

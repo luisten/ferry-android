@@ -34,7 +34,8 @@
             android:name=".EngineService"
             android:exported="false"
             android:foregroundServiceType="remoteMessaging" />
-        <!-- Share and Share All: the media cache's files (and ours on their way) lent to the app the user picks, read only. -->
+        <!-- Share and Share All: the media cache's files (and ours on their way) lent to the app the user picks, read only;
+             the camera app writes the photo or video it takes for "+" into one file of ours. -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.files"

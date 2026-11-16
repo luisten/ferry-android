@@ -1,5 +1,7 @@
 package fi.ferry.messenger.ui
 
+import android.content.ActivityNotFoundException
+import android.content.pm.PackageManager
 import android.icu.lang.UCharacter
 import android.net.Uri
 import android.icu.lang.UProperty
@@ -131,6 +133,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import fi.ferry.messenger.AppModel
 import fi.ferry.messenger.MediaFiles
 import fi.ferry.messenger.Outgoing
@@ -149,6 +152,7 @@ import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.Timeline.GroupPosition
 import fi.ferry.messenger.model.UserProfile
 import fi.ferry.messenger.model.parseURL
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -214,14 +218,16 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
     val items = remember(roomID) { mutableStateListOf<ComposerItem>() }
     val context = LocalContext.current
     /** Each waits as "Preparing…" until `Outgoing` has it ready; one that can't be sent goes, with why. */
-    /** `copy`: pasted, so read at once (`Outgoing.prepare`). */
-    fun add(uris: List<Uri>, copy: Boolean = false) {
+    /** `copy`: pasted, so read at once (`Outgoing.prepare`). `captured`: the camera's file, which goes once it's read. */
+    fun add(uris: List<Uri>, copy: Boolean = false, captured: File? = null) {
         val left = MAX_ATTACHMENTS - items.size
         if (uris.size > left) AppModel.actionError = "You can send up to $MAX_ATTACHMENTS photos and videos at a time."
+        if (left <= 0) captured?.delete()
         for (uri in uris.take(max(left, 0))) {
             val item = ComposerItem(nextItemID++, context.contentResolver.getType(uri)?.startsWith("video/") == true)
             items += item
             Outgoing.prepare(context, uri, wanted = { items.any { it.id == item.id } }, copy = copy) { result ->
+                captured?.delete()
                 val i = items.indexOfFirst { it.id == item.id }
                 if (i < 0) { result.getOrNull()?.file?.delete(); return@prepare } // removed meanwhile
                 result.onSuccess { items[i] = item.copy(ready = it) }
@@ -242,6 +248,29 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
         if (left >= 2) pickSome.launch(PickVisualMediaRequest.Builder().setMediaType(media).setMaxItems(left).setOrderedSelection(true).build())
         else if (left == 1) pickOne.launch(PickVisualMediaRequest(media))
     }
+    // The camera from "+" (D4): the phone's camera app writes into a file of ours, lent to it for that one capture; no
+    // camera permission. Its path is saved, so a result that comes back to a recreated screen still finds it.
+    var capture by rememberSaveable { mutableStateOf<String?>(null) }
+    fun captured(ok: Boolean) {
+        val file = capture?.let(::File) ?: return
+        capture = null
+        if (ok && file.length() > 0) add(listOf(FileProvider.getUriForFile(context, "${context.packageName}.files", file)), captured = file)
+        else file.delete() // cancelled
+    }
+    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture(), ::captured)
+    val recordVideo = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo(), ::captured)
+    fun shoot(video: Boolean) {
+        val file = Outgoing.cameraFile(context, video)
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        capture = file.path
+        try {
+            if (video) recordVideo.launch(uri) else takePhoto.launch(uri)
+        } catch (_: ActivityNotFoundException) {
+            capture = null
+            AppModel.actionError = "No camera app on this phone."
+        }
+    }
+    val hasCamera = remember { context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
     var confirmingDelete by remember(roomID) { mutableStateOf(false) }
     val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
     val bar = Inbox.threadBar(room, login?.health, replyingInstead)
@@ -387,7 +416,8 @@ fun ThreadScreen(roomID: String, back: () -> Unit, relogin: (String) -> Unit) {
                     send = ::send,
                     focus = focus,
                     items = items,
-                    attach = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) AttachActions(library = ::library, paste = { add(it, copy = true) }) else null,
+                    attach = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) AttachActions(library = ::library, takePhoto = { shoot(video = false) }.takeIf { hasCamera },
+                        recordVideo = { shoot(video = true) }.takeIf { hasCamera }, paste = { add(it, copy = true) }) else null,
                     removeAttachment = ::removeItem,
                     sendVoice = if (bar == Inbox.ThreadBar.COMPOSER && editing == null) {
                         { note -> AppModel.sendMedia(note, replyingTo?.eventID, room); replyingTo = null }

@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- What Share can lend: full media files (MediaFiles) and our own on their way (Outgoing), nothing else of the cache. -->
+<!-- What Share can lend: full media files (MediaFiles) and our own on their way (Outgoing), nothing else of the cache;
+     and the camera app's output while it takes a photo or video (write, for that one capture's file only). -->
 <paths>
     <cache-path name="media" path="media/" />
     <cache-path name="outgoing" path="outgoing/" />
+    <cache-path name="camera" path="camera/" />
 </paths>

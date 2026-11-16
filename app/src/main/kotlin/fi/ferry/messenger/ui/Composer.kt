@@ -47,6 +47,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -313,8 +315,11 @@ sealed interface ComposerMode {
     data object AcceptsRequest : ComposerMode
 }
 
-/** What "+" offers: the photo picker. `paste`: photos and videos pasted into the field, or a keyboard's (D5). */
-class AttachActions(val library: () -> Unit, val paste: (List<Uri>) -> Unit)
+/**
+ * What "+" offers: the photo picker, and on a phone with a camera the camera app's photo and video (D4). `paste`: photos
+ * and videos pasted into the field, or a keyboard's (D5).
+ */
+class AttachActions(val library: () -> Unit, val takePhoto: (() -> Unit)?, val recordVideo: (() -> Unit)?, val paste: (List<Uri>) -> Unit)
 
 /**
  * DESIGN §6.9: the account's avatar (the chat is locked to it), the field ("Message as Studio"), and once there's text or
@@ -563,13 +568,30 @@ const val MAX_ATTACHMENTS = 10
 /** A photo or video waiting above the field (iOS's `ComposerItem`): being prepared (`Outgoing`) until it's `ready`. */
 data class ComposerItem(val id: Long, val video: Boolean, val ready: Attachment? = null)
 
-/** "+" in its own circle (as iOS), the photo picker; off at 10 waiting. */
+/**
+ * "+" in its own circle (as iOS), off at 10 waiting. With a camera, a menu in iOS's order (A21): Take Photo, Record
+ * Video (Android has no one intent for both), Choose from Library; without one, the photo picker at once.
+ */
 @Composable
 private fun PlusButton(attach: AttachActions, enabled: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    val menu = attach.takePhoto != null || attach.recordVideo != null
     val ink = MaterialTheme.colorScheme.onBackground
-    Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
-        .clickable(enabled = enabled, onClickLabel = "Add photos or videos", onClick = attach.library), contentAlignment = Alignment.Center) {
-        Icon(Icons.add, "Add photos or videos", tint = if (enabled) ink else ink.copy(alpha = 0.38f))
+    Box {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(enabled = enabled, onClickLabel = "Add photos or videos") { if (menu) open = true else attach.library() },
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.add, "Add photos or videos", tint = if (enabled) ink else ink.copy(alpha = 0.38f))
+        }
+        DropdownMenu(open, { open = false }) {
+            attach.takePhoto?.let { take ->
+                DropdownMenuItem({ Text("Take Photo") }, { open = false; take() }, leadingIcon = { Icon(Icons.camera, null) })
+            }
+            attach.recordVideo?.let { record ->
+                DropdownMenuItem({ Text("Record Video") }, { open = false; record() }, leadingIcon = { Icon(Icons.video, null) })
+            }
+            DropdownMenuItem({ Text("Choose from Library") }, { open = false; attach.library() }, leadingIcon = { Icon(Icons.photo, null) })
+        }
     }
 }
 
