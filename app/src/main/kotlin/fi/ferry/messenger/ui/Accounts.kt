@@ -80,36 +80,6 @@ import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.BridgeAPI.Login.Health
 import fi.ferry.messenger.model.Inbox
 
-/** O1 (DESIGN §2): no account yet. What Ferry is, and the one way in. */
-@Composable
-fun Welcome(login: () -> Unit) {
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 28.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Spacer(Modifier.weight(1f))
-            Text("Ferry", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.semantics { heading() })
-            Text("All your Instagram DMs.\nNone of the feed.", style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            for (promise in listOf("Every account, one inbox", "Reels play right in the chat", "No feed, no Explore, no algorithm")) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.check, null, Modifier.size(20.dp))
-                    Text(promise, Modifier.padding(start = 10.dp), style = MaterialTheme.typography.bodyLarge)
-                }
-            }
-            Spacer(Modifier.weight(1f))
-            if (AppModel.connecting) Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                Text("Connecting…", Modifier.padding(start = 10.dp))
-            }
-            AppModel.loginError?.let { Text("Couldn't connect: $it", color = Status.error, style = MaterialTheme.typography.bodyMedium) }
-            Button(login, Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = !AppModel.connecting) { Text("Connect Instagram account") }
-            Text("Your password goes only to Instagram. Ferry Messenger keeps the session on this phone, encrypted.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Not affiliated with Instagram or Meta.", Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        }
-    }
-}
-
 /**
  * O5 "Name this account" (DESIGN §3.1), right after a new account connects; for the first one, O6 then offers a
  * second. `done(addAnother)`.
