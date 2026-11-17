@@ -5,19 +5,21 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -46,6 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
@@ -100,44 +104,47 @@ fun NewMessageScreen(open: (String) -> Unit, back: () -> Unit) {
     }
     LaunchedEffect(from) { if (from != null) focus.requestFocus() }
 
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
+    Scaffold(containerColor = Grouped.page) { padding ->
+        Column(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize()) {
             Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(back) { Icon(Icons.back, "Back") }
-                Text("New message", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text("New Message", Modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             }
-            Text("From", Modifier.padding(start = 16.dp, top = 4.dp), style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FromChips(from) { from = it }
-            TextField(
-                query, { query = it },
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp).focusRequester(focus),
-                enabled = from != null,
-                singleLine = true,
-                prefix = { Text("To: ", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                placeholder = { Text(if (from == null) "Choose an account first" else "Search Instagram") },
-                trailingIcon = if (search == Search.Searching) ({ CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) }) else null,
-                keyboardOptions = KeyboardOptions(KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Search),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
-                ),
-            )
-            login?.profile?.username?.let {
-                Text("Searching Instagram from @$it", Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            when (val s = search) {
-                Search.Idle, Search.Searching -> {}
-                Search.Failed -> Note("Couldn't search from $name. Check that it's connected.")
-                is Search.Done -> if (s.contacts.isEmpty()) Note("No Instagram accounts match “$trimmed”") else {
-                    val account = from ?: return@Column
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(s.contacts, key = { it.id }) { contact ->
-                            Result(contact, account, opening == contact.id, enabled = opening == null) {
-                                opening = contact.id
-                                AppModel.openDM(contact, account) { room, why ->
-                                    opening = null
-                                    if (room != null) open(room) else error = why
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("From", Modifier.padding(start = 32.dp).semantics { heading() }, style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FromChips(from) { from = it }
+                // As iOS's form: the field and the results are one card, the footer under them.
+                Box(Modifier.padding(horizontal = 16.dp)) {
+                    GroupedSection(footer = login?.profile?.username?.let { "Searching Instagram from @$it" }) {
+                        TextField(
+                            query, { query = it },
+                            Modifier.fillMaxWidth().focusRequester(focus),
+                            enabled = from != null,
+                            singleLine = true,
+                            prefix = { Text("To: ", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                            placeholder = { Text(if (from == null) "Choose an account first" else "Search Instagram") },
+                            trailingIcon = if (search == Search.Searching) ({ CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) }) else null,
+                            keyboardOptions = KeyboardOptions(KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Search),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent,
+                            ),
+                        )
+                        when (val s = search) {
+                            Search.Idle, Search.Searching -> {}
+                            Search.Failed -> { RowDivider(); Note("Couldn't search from $name. Check that it's connected.") }
+                            is Search.Done -> if (s.contacts.isEmpty()) { RowDivider(); Note("No Instagram accounts match “$trimmed”") } else {
+                                val account = from
+                                if (account != null) s.contacts.forEachIndexed { i, contact ->
+                                    RowDivider(if (i == 0) 16.dp else 68.dp)
+                                    Result(contact, account, opening == contact.id, enabled = opening == null) {
+                                        opening = contact.id
+                                        AppModel.openDM(contact, account) { room, why ->
+                                            opening = null
+                                            if (room != null) open(room) else error = why
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -167,7 +174,7 @@ private fun Result(contact: BridgeAPI.Contact, account: String, opening: Boolean
         Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = start).heightIn(min = 60.dp).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Picture(contact.avatarURL, shown, 40.dp)
+        Picture(contact.avatarURL, shown, 36.dp)
         Column(Modifier.weight(1f)) {
             Text(shown, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
             if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -179,14 +186,14 @@ private fun Result(contact: BridgeAPI.Contact, account: String, opening: Boolean
 /** DESIGN N1's From row: one chip per account (mark and name), the chosen one filled with its colour like a scope chip. */
 @Composable
 private fun FromChips(selected: String?, select: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (login in AppModel.orderedAccounts) {
             val identity = AppModel.identities[login.id] ?: continue
             val on = login.id == selected
             Row(
                 Modifier.heightIn(min = 44.dp).clip(CircleShape)
-                    .background(if (on) identity.color.fillColor else MaterialTheme.colorScheme.surfaceVariant)
+                    .background(if (on) identity.color.fillColor else MaterialTheme.colorScheme.surfaceContainerHighest)
                     .clickable { select(login.id) }
                     .clearAndSetSemantics {
                         contentDescription = login.profile?.username?.let { "${identity.name} account, @$it" } ?: "${identity.name} account"
