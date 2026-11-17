@@ -32,6 +32,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,69 +69,55 @@ fun ChatInfoScreen(room: Room, back: () -> Unit) {
     // The thread's start block says the same: "4 members", "@handle".
     val subtitle = Inbox.startBlock(isGroup, Inbox.memberCount(room), handle, null, false).subtitle
     var person by remember { mutableStateOf<Inbox.Member?>(null) }
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+    Scaffold(containerColor = Grouped.page) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             Box(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 8.dp)) {
                 IconButton(back, Modifier.align(Alignment.CenterStart)) { Icon(Icons.back, "Back") }
                 Text("Chat Info", Modifier.align(Alignment.Center).semantics { heading() }, style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold)
             }
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Box(Modifier.padding(bottom = 6.dp)) { ChatAvatar(room, 88.dp) }
-                    Text(room.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-                    subtitle?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
-                if (identity != null) Group(footer = "Replies always come from this account.") {
-                    // "Account", not "In [tag]" (iOS review 2026-10-15 #6), with the handle.
-                    InfoRow("Account") { AccountTag(identity, handle = login?.profile?.username) }
-                    if (folder == Inbox.Folder.GENERAL) {
-                        HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                        InfoRow("Folder") { Text("General", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            CompositionLocalProvider(LocalMarkRing provides Grouped.card) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Box(Modifier.padding(bottom = 6.dp)) { CompositionLocalProvider(LocalMarkRing provides Grouped.page) { ChatAvatar(room, 88.dp) } }
+                        Text(room.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        subtitle?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
-                }
-                if (isGroup) {
-                    // Read-only (no member actions yet): a tap shows who someone is. Everyone came with the thread.
-                    val members = Inbox.members(room, AppModel.ME, AppModel.profiles)
-                    Group("${members.size} ${if (members.size == 1) "Member" else "Members"}", "To add or remove people, use Instagram.") {
-                        members.forEachIndexed { i, member ->
-                            if (i > 0) HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                            MemberRow(member, identity, login?.profile?.username, login?.profile?.avatar, login?.displayName.orEmpty()) { person = member }
+                    if (identity != null) GroupedSection(footer = "Replies always come from this account.") {
+                        // "Account", not "In [tag]" (iOS review 2026-10-15 #6), with the handle.
+                        InfoRow("Account") { AccountTag(identity, handle = login?.profile?.username) }
+                        if (folder == Inbox.Folder.GENERAL) {
+                            HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            InfoRow("Folder") { Text("General", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                     }
-                }
-                handle?.let { h ->
-                    Group { ActionRow("Open in Instagram", Icons.openOutside) { openProfile(context, h) } }
-                }
-                if (folder != Inbox.Folder.REQUESTS) { // requests stay in Requests; archiving one would do nothing
-                    val archived = folder == Inbox.Folder.ARCHIVED
-                    Group(footer = if (archived) "It's in Archived. A new message brings it back by itself."
-                        else "Archived chats come back when there's a new message. Instagram isn't changed.") {
-                        ActionRow(if (archived) "Unarchive Chat" else "Archive Chat", null) { AppModel.setArchived(!archived, room) }
+                    if (isGroup) {
+                        // Read-only (no member actions yet): a tap shows who someone is. Everyone came with the thread.
+                        val members = Inbox.members(room, AppModel.ME, AppModel.profiles)
+                        GroupedSection("${members.size} ${if (members.size == 1) "Member" else "Members"}", "To add or remove people, use Instagram.") {
+                            members.forEachIndexed { i, member ->
+                                if (i > 0) HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                                MemberRow(member, identity, login?.profile?.username, login?.profile?.avatar, login?.displayName.orEmpty()) { person = member }
+                            }
+                        }
+                    }
+                    handle?.let { h ->
+                        GroupedSection { ActionRow("Open in Instagram", Icons.openOutside) { openProfile(context, h) } }
+                    }
+                    if (folder != Inbox.Folder.REQUESTS) { // requests stay in Requests; archiving one would do nothing
+                        val archived = folder == Inbox.Folder.ARCHIVED
+                        GroupedSection(footer = if (archived) "It's in Archived. A new message brings it back by itself."
+                            else "Archived chats come back when there's a new message. Instagram isn't changed.") {
+                            ActionRow(if (archived) "Unarchive Chat" else "Archive Chat", null) { AppModel.setArchived(!archived, room) }
+                        }
                     }
                 }
             }
         }
     }
     person?.let { PersonCard(it.name, it.handle, it.avatarURL) { person = null } }
-}
-
-/** iOS's grouped form section: a header, rows on a tinted card, a footer. */
-@Composable
-private fun Group(header: String? = null, footer: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        header?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp).semantics { heading() }, style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.onBackground.copy(alpha = 0.05f)),
-            content = content)
-        footer?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
 }
 
 @Composable
@@ -154,7 +141,7 @@ private fun ActionRow(label: String, icon: androidx.compose.ui.graphics.vector.I
 
 /**
  * One member: picture, name and @handle when Instagram gave it. We're "You", with our account's picture and ring
- * (colour means account), and not tappable.
+ * (colour means account) and its mark, and not tappable.
  */
 @Composable
 private fun MemberRow(member: Inbox.Member, identity: fi.ferry.messenger.model.AccountIdentity?, ownHandle: String?, ownAvatar: String?,
@@ -168,7 +155,7 @@ private fun MemberRow(member: Inbox.Member, identity: fi.ferry.messenger.model.A
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 30 dp and its ring: as wide as the others' 36.
-        if (member.isMe) AccountAvatar(identity, ownAvatar, ownName, 30.dp) else Picture(member.avatarURL, member.name, 36.dp)
+        if (member.isMe) AccountAvatar(identity, ownAvatar, ownName, 30.dp, mark = true) else Picture(member.avatarURL, member.name, 36.dp)
         Spacer(Modifier.width(12.dp))
         Column {
             Text(member.name, style = MaterialTheme.typography.bodyLarge)

@@ -117,7 +117,7 @@ fun ChatAvatar(room: Room, size: Dp) {
             Box(Modifier.size(size)) {
                 Box(Modifier.align(Alignment.TopStart)) { Picture(faces[0].avatarURL, faces[0].name, face) }
                 // The front face cut out of the back one.
-                Box(Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).background(MaterialTheme.colorScheme.background, CircleShape).padding(2.dp)) {
+                Box(Modifier.align(Alignment.BottomEnd).offset(2.dp, 2.dp).background(LocalMarkRing.current ?: MaterialTheme.colorScheme.background, CircleShape).padding(2.dp)) {
                     Picture(faces[1].avatarURL, faces[1].name, face)
                 }
             }
