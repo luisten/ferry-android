@@ -35,6 +35,13 @@ The first version for friends: what the iPhone app has up to its 1.7.
 - The welcome screen shows Ferry's ferry crossing the sea with two accounts aboard, and logging in, connecting, naming
   an account, adding another and the Accounts pages look as they do on the iPhone. The login page says when it's
   loading and connecting, and offers "Try again" when it can't connect.
+- The rest of the app looks as it does on the iPhone: Delete and Accept under each message request in the Requests list;
+  Chat Info and New Message on the same grey page and cards in light and dark; the inbox's banner with the account's
+  picture, "Can't reach Instagram" with Try Again when the first load can't connect, a darker Archive swipe, and the
+  requests card ending in "+2" instead of cutting a name; photos, videos and cards shaped like their bubble, a solid play
+  button on voice messages, an error sign on "Not sent", a one-line signed-out bar in a chat, and the account's colour on
+  the voice message's Send and held microphone. The app opens on a dark window in dark mode, and on the launch colour
+  before Android 12.
 - Accounts: see each account's state, rename it or change its colour and mark, log in again when Instagram signs you
   out (a banner and the chat say so), or remove an account from this phone.
 - Notifications for new messages, saying which of your accounts each one is for. Ferry stays connected in the

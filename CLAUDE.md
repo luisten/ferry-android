@@ -178,14 +178,17 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   the copy (A23, A46); only `content:` URIs whose provider type is `image/*`/`video/*` are taken.
 - **A request** shows `RequestBar` instead of the composer (`Inbox.threadBar`). Accept and Delete are optimistic
   (`Room.requestAction`: the chat moves or hides at once) and undone with a notice if the engine refuses; a Delete's
-  room then goes with the engine's `RoomRemoved`. "Reply instead" sends through the engine, which accepts first.
+  room then goes with the engine's `RoomRemoved`. "Reply instead" sends through the engine, which accepts first. The Requests folder's rows carry the same Delete (asks first, `DeleteRequestDialog`) and
+  Accept under each row (`RequestButtons`, `SmallButton`).
 - **Accounts** (A7, the iOS app's rules and copy): an identity (name, colour, mark) can't share any of the three with
   another account (`AccountIdentity.problems`, tested); a new login is named first (`AppModel.naming`). Re-login
   goes through the same web view with the account to fix (`login(cookies, relogin)`): another account that isn't
   ours is stopped, its updates dropped, and the user told who to log in as. Remove Account stops its client
   (`IGStop`), deletes its session and identity and drops its chats; its archive and Requests markers stay, hidden.
   Health: `Inbox.banner` (offline after 2 failed connects with none connected, else the account in trouble),
-  "Later" hides it until it changes; a signed-out account's chats get `RecoveryBar` instead of the composer.
+  "Later" hides it until it changes; a signed-out account's chats get `RecoveryBar` (one row; the button in the account's ink) instead of the composer.
+  At a first sync that can't reach Instagram (2 failed connects, nothing loaded) the inbox is "Can't reach Instagram" with Try Again
+  (`restartSync`), not placeholders and not the banner.
   A new login goes O3 (`LoginScreen`, which stays under "Connecting…" until the engine answers, and shows its error
   with "Try again") → O4 (`ConnectingScreen`, `AppModel.justConnected`) → O5 → O6 after the first (`ui/Onboarding.kt`).
   Demo switches: `--ez signed_out true` (Kivo signed out), `--ez naming true` (O5 for Tamo), `--ez connecting true`
@@ -202,7 +205,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **iOS parity is UI too** (the user, 2026-10-22): the same logo, layout and copy as the iOS app, in Material.
   The icon is the iOS repo's `docs/design/ferry-icon-color.svg` with its paths copied verbatim into the adaptive
   icon (`res/drawable/ic_launcher_*`, the 1024 artboard centred in the 108 dp layer), the themed icon and the
-  launch mark (dark: `ferry-icon-color-dark.svg`'s colours), and `FerryShape` (`ui/Welcome.kt`: Welcome's scene and the
+  launch mark (dark: `ferry-icon-color-dark.svg`'s colours; before Android 12 the launch window is `Theme.Ferry` with
+  `drawable/launch_background`, dark in `values-night`, and `MainActivity` switches to `Theme.Ferry.App` before drawing), and `FerryShape` (`ui/Welcome.kt`: Welcome's scene and the
   onboarding deck draw from its path strings). Redo them when the SVGs change.
 - **Opening a thread** (iOS 1.5): unread, it holds the "New messages" line under the last message read unless what's
   new reaches less than a quarter screen past it; hidden until placed (1 s at most). The list is reversed, so the
@@ -236,7 +240,7 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   and Archived too, never on a request or an Instagram-unread chat.
 - **Archive is this phone's only** (as on iOS, DESIGN §4.5): a room tag (`Inbox.ARCHIVED_TAG`) from a map in
   SharedPreferences, put back on each update, so a newer message brings the chat back. Instagram isn't told. A row
-  swiped left (`SwipeToDismissBox`, its grey only as wide as the swipe) or long-pressed archives or unarchives it.
+  swiped left (`SwipeToDismissBox`, iOS's dark `swipeArchive` grey, only as wide as the swipe) or long-pressed archives or unarchives it.
 - **Chat Info** (iOS 1.2, DESIGN T3) is drawn over the thread, which stays composed underneath (its draft, its place,
   its "Seen"), opened from the header capsule or ⋯. The person card (`PersonCard`) shows only what the thread brought:
   nothing is asked of Instagram. Pull to refresh (inbox) and opening Accounts call `AppModel.restartSync`: an account
@@ -263,7 +267,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **Media** (A6, the iOS app's rules): cards download their file on a tap, never in the row's scope (a row scrolled
   away would cancel it), into `MediaFiles` (cache folder, Instagram's file names, https only, trimmed past 500 MB); a
   failed download reads the thread again (`IGReadChat`), since links expire. A card registers its tap with the
-  message's own gesture handler (`LocalTap`), so a long press on a photo still opens the menu; a card with its own tap
+  message's own gesture handler (`LocalTap`), so a long press on a photo still opens the menu; every card is clipped with
+  the bubble's shape (`bubbleShape`: 20, 6 where joined; an opened set's cards first/middle/last, 2 dp apart); a card with its own tap
   (each one of an opened set) takes the message's long press too (`TapTarget.hold`). GIFs play three times
   once per launch, stickers loop, neither in a request or with animations off (Android 9+, `AnimatedImageDrawable`).
 - **Sending media** (`Outgoing`): photos as JPEG (at most 2048 px, quality 85/70/50 until under 8,000,000 bytes; no
@@ -275,9 +280,9 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   let go after a second, five minutes sends itself, leaving the thread or the app throws it away.
 - **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
   only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name, and Welcome's sea
-  (`Scenery`, scenery only: never text, a control or chrome). Grouped pages (O5, A1, A2) use `Grouped.page` and
-  `.card`; a mark over an avatar on a card takes `LocalMarkRing` for its cut-out. Welcome's and O4's motion follow
-  `Crossing.motion` (still with animations off or battery saver, paused below RESUMED). Glyphs are a few
+  (`Scenery`, scenery only: never text, a control or chrome). Grouped pages (O5, A1, A2, Chat Info, New Message) use `Grouped.page` and
+  `.card` (`GroupedSection`); a mark over an avatar on a card takes `LocalMarkRing` for its cut-out. Welcome's and O4's motion follow
+  `Crossing.motion` (still with animations off or battery saver, paused below RESUMED). `Status.ok`/`warn`/`error` are iOS's hex values. Glyphs are a few
   Material Icons path strings in `ui/Icons.kt`, not a library. iOS draws SF Symbols, which Apple licenses for its
   platforms only: pick the closest Material icon (`tray.2` → `all_inbox`, outlined) and match the button around it. Profile pictures load https only, in memory (`Pictures`).
 - An account gets its default name, colour and mark (`AccountIdentity.withDefaults`) only once Instagram has said who
