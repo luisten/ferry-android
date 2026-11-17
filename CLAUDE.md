@@ -125,7 +125,7 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   `DemoTests` pins what each shows): `incoming` (Noor, 10 s in), `busy` (Harbor Coffee opens unread), `reaction` (a 😮
   reaction and its log entry in Jonas Berg's chat, 10 s in), `clipboard` (two made-up JPEGs on the clipboard), `--ei
   group_older n` (the group pages in from its newest five, then n pages of 20), `--ei group_extra n` (n more unread in
-  the group), `signed_out`, `naming`. Always there: Ada Lind (days, links, emoji, a tombstone, a failed message),
+  the group), `signed_out`, `naming`, `connecting` (O4 for Tamo, then O5; with `signed_out`, O4 failed for Kivo). Always there: Ada Lind (days, links, emoji, a tombstone, a failed message),
   Ravi Shah (a reaction log entry), Elena's photo without a URL. The demo's `markRead` does nothing and its sends fail
   after 0.6 s (through the send line, so the order shows).
 - **Live checks use the two dummies only** (stand-ins `tamoveska` personal, `kivostudio` professional; real names only
@@ -186,7 +186,10 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   (`IGStop`), deletes its session and identity and drops its chats; its archive and Requests markers stay, hidden.
   Health: `Inbox.banner` (offline after 2 failed connects with none connected, else the account in trouble),
   "Later" hides it until it changes; a signed-out account's chats get `RecoveryBar` instead of the composer.
-  Demo switches: `--ez signed_out true` (Kivo signed out), `--ez naming true` (O5 for Tamo); live, `--es
+  A new login goes O3 (`LoginScreen`, which stays under "Connecting…" until the engine answers, and shows its error
+  with "Try again") → O4 (`ConnectingScreen`, `AppModel.justConnected`) → O5 → O6 after the first (`ui/Onboarding.kt`).
+  Demo switches: `--ez signed_out true` (Kivo signed out), `--ez naming true` (O5 for Tamo), `--ez connecting true`
+  (O4 for Tamo; with `signed_out`, failed for Kivo); live, `--es
   signed_out_account <id>` shows that account signed out (locally, nothing sent) until it logs in again (A3's check).
 - **Notifications** (E8 = option 1, 2026-10-22; option 3, a relay and FCM shared with iOS, is the later decision):
   `EngineService` (type `remoteMessaging`, started with the first account, at boot, stopped with the last one; never

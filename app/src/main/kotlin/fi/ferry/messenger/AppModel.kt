@@ -68,6 +68,8 @@ object AppModel {
     var visibleRoom: String? = null
     /** A new account just connected: it's named next (O5, DESIGN §3.1). */
     var naming by mutableStateOf<String?>(null)
+    /** A new account just logged in: O4 shows it connecting, before O5 names it. */
+    var justConnected by mutableStateOf<String?>(null)
     /** Failed reconnects while no account is connected: two make the "Can't reach Instagram" banner. */
     var syncFailures by mutableStateOf(0); private set
     /** The banner "Later" put away; it comes back at the next launch, or when it changes. */
@@ -723,7 +725,10 @@ object AppModel {
         val seq = login.seq ?: 0
         if (seq <= appliedSeq) loaded += id else waiting[id] = seq
         updateInitialSync()
-        if (isNew) naming = id
+        if (isNew) {
+            justConnected = id
+            naming = id
+        }
         if (isNew) EngineService.start(appContext)
     }
 

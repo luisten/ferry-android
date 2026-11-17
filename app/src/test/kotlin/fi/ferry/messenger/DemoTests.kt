@@ -6,6 +6,8 @@ import fi.ferry.messenger.model.JoinedRoom
 import fi.ferry.messenger.model.MessageKind
 import fi.ferry.messenger.model.MessagesPage
 import fi.ferry.messenger.model.Timeline
+import fi.ferry.messenger.ui.Connecting
+import fi.ferry.messenger.ui.Connecting.Step
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -99,5 +101,17 @@ class DemoTests {
         assertEquals("Reacted 😮 to your message", Inbox.preview(jonas, me)?.text)
         assertEquals(1, Timeline.reduce(jonas, me).first().reactions.size)
         assertTrue(Timeline.notifiable(events, me, now - 1).isEmpty())
+    }
+
+    @Test fun connectingShowsTamoSyncedOrKivoFailed() {
+        val tamo = IGAdapter.login(Demo.connecting(signedOut = false), Demo.viewers[Demo.TAMO], "CONNECTED", since = now)
+        assertEquals(Demo.TAMO, tamo.id)
+        assertEquals(listOf(Step.DONE, Step.DONE, Step.DONE), Connecting.steps(tamo.health))
+        val chats = Demo.rooms(now).count { it.bridge?.receiver == Demo.TAMO && Inbox.isVisible(it, Demo.viewers.keys) }
+        assertEquals("7 chats", Connecting.chats(chats, tamo.health)) // Tamo's chats and requests in the demo
+        val kivo = IGAdapter.login(Demo.connecting(signedOut = true), Demo.viewers[Demo.KIVO], "BAD_CREDENTIALS", since = now)
+        assertEquals(Demo.KIVO, kivo.id)
+        assertEquals(listOf(Step.DONE, Step.FAILED, Step.WAITING), Connecting.steps(kivo.health))
+        assertEquals("BAD_CREDENTIALS", Connecting.details(kivo))
     }
 }

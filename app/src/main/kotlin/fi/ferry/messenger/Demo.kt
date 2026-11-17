@@ -41,6 +41,9 @@ object Demo {
     /** The chat of `--ez reaction true`: Jonas Berg (read), whose first message is ours. */
     private const val REACTION_ROOM = "!debug-demo-3"
 
+    /** `--ez connecting true`: O4 for Tamo (connected, its chats synced), or with `signed_out` for Kivo (failed). */
+    fun connecting(signedOut: Boolean) = if (signedOut) KIVO else TAMO
+
     val viewers = mapOf(
         TAMO to IG.Viewer(fbid = TAMO, username = "tamoveska", fullName = "Tamo Veska", isProfessionalAccount = false),
         KIVO to IG.Viewer(fbid = KIVO, username = "kivostudio", fullName = "Kivo Studio", isProfessionalAccount = true),

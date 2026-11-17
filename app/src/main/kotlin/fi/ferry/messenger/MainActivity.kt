@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.FileProvider
 import fi.ferry.messenger.ui.AccountScreen
 import fi.ferry.messenger.ui.AccountsSheet
+import fi.ferry.messenger.ui.ConnectingScreen
 import fi.ferry.messenger.ui.FerryTheme
 import fi.ferry.messenger.ui.FolderScreen
 import fi.ferry.messenger.ui.InboxScreen
@@ -42,7 +43,8 @@ class MainActivity : ComponentActivity() {
         // Debug builds: `--ez demo true` shows made-up data only, and nothing connects (`Demo`); `--es request_room <room>`
         // has the engine treat that real chat as a request and hold back its sends (iOS's FERRY_DEBUG_AS_REQUEST).
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska;
+        // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska,
+        // `--ez connecting true` O4 then O5 (for Kivo, failed, with `signed_out`);
         // `--ez incoming true` and `--ez reaction true` bring a message and a reaction 10 s in, `--ez busy true` many
         // new messages in Harbor Coffee, `--ei group_older <n>` has the group page back from five messages (n pages
         // of 20 made-up ones after its own), `--ei group_extra <n>` adds n unread messages to the group (see `Demo`),
@@ -59,6 +61,10 @@ class MainActivity : ComponentActivity() {
             demoGroupExtra = if (demo) intent.getIntExtra("group_extra", 0) else 0)
         AppModel.openRoom = intent.getStringExtra(OPEN_ROOM)
         if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
+        if (demo && intent.getBooleanExtra("connecting", false)) Demo.connecting(intent.getBooleanExtra("signed_out", false)).let {
+            AppModel.justConnected = it
+            AppModel.naming = it
+        }
         if (demo && intent.getBooleanExtra("clipboard", false)) demoClipboard()
         setContent { FerryTheme { App() } }
     }
@@ -137,10 +143,13 @@ private fun App() {
 
     val screen = stack.last()
     val naming = AppModel.naming
+    val justConnected = AppModel.justConnected
     when {
         // The login's answer can come after the stack changed (a notification opened a chat): only the login goes.
         screen is Screen.Login -> LoginScreen(screen.relogin, close = ::pop, connected = { stack = stack.filterNot { it is Screen.Login } })
-        // O5, then O6: a new account gets its name, colour and mark before anything else.
+        // O4, O5, then O6: a new account connects, then gets its name, colour and mark before anything else.
+        justConnected != null && justConnected in AppModel.loginIDs ->
+            ConnectingScreen(justConnected, retry = { push(Screen.Login(relogin = justConnected)) }) { AppModel.justConnected = null }
         naming != null && naming in AppModel.loginIDs -> NameAccountScreen(naming) { addAnother ->
             AppModel.naming = null
             if (addAnother) push(Screen.Login())
