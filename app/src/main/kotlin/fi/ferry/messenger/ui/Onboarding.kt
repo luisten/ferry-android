@@ -3,6 +3,14 @@ package fi.ferry.messenger.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.CompositionLocalProvider
+import fi.ferry.messenger.model.AccountIdentity
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -169,6 +177,65 @@ private fun ConnectFailure(login: BridgeAPI.Login?, retry: () -> Unit) {
                 context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Details", details))
                 copied = true
             }) { Text(if (copied) "Copied" else "Copy Details") }
+        }
+    }
+}
+
+/**
+ * O5 "Name this account" (DESIGN O5, iOS `NameAccountView`), right after a new account connects: a grouped page with
+ * the editor, Save in the top bar and, for the first account, "Add another account" as the last row; O6 then offers a
+ * second. `done(addAnother)`. Back skips naming (the defaults stay).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun NameAccountScreen(id: String, done: (addAnother: Boolean) -> Unit) {
+    val login = AppModel.accounts.firstOrNull { it.id == id }
+    val start = AppModel.identities[id]
+    var draft by remember(id) { mutableStateOf(start) }
+    var offerAnother by remember { mutableStateOf(false) }
+    val first = AppModel.accounts.size <= 1
+    BackHandler { done(false) }
+    if (offerAnother) {
+        Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
+            Column(Modifier.padding(padding).fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
+                Text("Add another account?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Connect a second Instagram account. Each chat stays tied to the account it belongs to.", style = MaterialTheme.typography.bodyLarge)
+                Button({ done(true) }, Modifier.fillMaxWidth()) { Text("Connect another account") }
+                TextButton({ done(false) }, Modifier.fillMaxWidth()) { Text("Not now") }
+            }
+        }
+        return
+    }
+    val identity = draft ?: return done(false)
+    val valid = AccountIdentity.problems(identity, id, AppModel.identities).isEmpty()
+    fun save(): Boolean {
+        if (!valid) return false
+        AppModel.setIdentity(id, identity)
+        return true
+    }
+    Scaffold(
+        containerColor = Grouped.page,
+        topBar = {
+            TopAppBar(
+                title = { Text("Name this account") },
+                actions = { TextButton({ if (save()) { if (first) offerAnother = true else done(false) } }, enabled = valid) { Text("Save") } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Grouped.page, scrolledContainerColor = Grouped.page),
+            )
+        },
+    ) { padding ->
+        CompositionLocalProvider(LocalMarkRing provides Grouped.card) {
+            Column(
+                Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize().verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Text("Pick a name, color and mark for ${login?.profile?.username?.let { "@$it" } ?: "this account"}. You'll see them on every chat from this account.",
+                    Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 20.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                IdentityEditor(id, identity, login) { draft = it }
+                // A row, not a bottom bar: a bar covered the colours and Mark on iOS.
+                if (first) GroupedSection { ActionRow("Add another account", Icons.add, enabled = valid) { if (save()) done(true) } }
+            }
         }
     }
 }

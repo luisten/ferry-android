@@ -64,6 +64,15 @@ object Status {
 }
 
 /**
+ * DESIGN §8.1's grouped pages (O5, A1, A2: iOS's inset-grouped `Form`): the page, and the cards on it
+ * (`systemGroupedBackground`, `secondarySystemGroupedBackground`).
+ */
+object Grouped {
+    val page: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color.Black else Color(0xFFF2F2F7)
+    val card: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color.White
+}
+
+/**
  * Brand: scenery only (DESIGN §8.1 "Brand: the sea", principle 10): O1's sea, as iOS's `Scenery`. Never a tint, a
  * control, text or chrome: colour in the UI means account. The icon and the launch screen carry it in their own files.
  */

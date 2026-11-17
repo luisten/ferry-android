@@ -16,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
@@ -48,12 +49,15 @@ import java.net.URL
 // The account identity system (DESIGN §3): colour is never shown without the mark or the name, and the mark is
 // never a separate element for TalkBack (its meaning goes into the parent's label).
 
+/** The surface a mark's cut-out ring matches (iOS `markRing`): the page's background unless a card provides its own. */
+val LocalMarkRing = compositionLocalOf<Color?> { null }
+
 /** A filled circle in the account's colour with its mark in white; `ring` is the cut-out over an avatar. */
 @Composable
 fun AccountMark(identity: AccountIdentity, size: Dp, ring: Dp = 0.dp, inverted: Boolean = false) {
     Box(
         Modifier
-            .background(if (ring > 0.dp) MaterialTheme.colorScheme.background else Color.Transparent, CircleShape)
+            .background(if (ring > 0.dp) LocalMarkRing.current ?: MaterialTheme.colorScheme.background else Color.Transparent, CircleShape)
             .padding(ring)
             .size(size)
             .background(if (inverted) Color.White else identity.color.fillColor, CircleShape),
@@ -80,15 +84,26 @@ fun AccountTag(identity: AccountIdentity, modifier: Modifier = Modifier, compact
     }
 }
 
-/** One of *your* accounts: its picture with a gap and a ring in the account's colour, drawn outside `size`. */
+/**
+ * One of *your* accounts: its picture with a gap and a ring in the account's colour, drawn outside `size`; with `mark`,
+ * the mark at the picture's bottom end (84%, 40% of its size, as iOS's `AccountAvatar`).
+ */
 @Composable
-fun AccountAvatar(identity: AccountIdentity?, url: String?, name: String, size: Dp) {
+fun AccountAvatar(identity: AccountIdentity?, url: String?, name: String, size: Dp, mark: Boolean = false) {
     val line = if (size <= 32.dp) 1.5.dp else 2.dp
     Box(
         Modifier.size(size + line * 4)
             .then(if (identity != null) Modifier.border(line, identity.color.fillColor, CircleShape) else Modifier),
         contentAlignment = Alignment.Center,
-    ) { Picture(url, name, size) }
+    ) {
+        Picture(url, name, size)
+        if (mark && identity != null) {
+            val markSize = maxOf(12.dp, size * 0.4f)
+            // From the box's corner: the ring's room, then the mark's centre at 84% of the picture.
+            val at = line * 2 + size * 0.84f - markSize / 2 - line
+            Box(Modifier.align(Alignment.TopStart).offset(at, at)) { AccountMark(identity, markSize, ring = line) }
+        }
+    }
 }
 
 /** A chat's picture: the contact's, else a group's two faces or its people glyph, else the name's initial. */
