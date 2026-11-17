@@ -30,7 +30,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -84,7 +83,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import fi.ferry.messenger.AppModel
 import fi.ferry.messenger.model.AccountColor
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -108,12 +106,7 @@ fun Welcome(login: () -> Unit) {
         bottomBar = {
             Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (AppModel.connecting) Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Text("Connecting…", Modifier.padding(start = 10.dp))
-                }
-                AppModel.loginError?.let { Text("Couldn't connect: $it", color = Status.error, style = MaterialTheme.typography.bodyMedium) }
-                Button(login, Modifier.fillMaxWidth().heightIn(min = 50.dp), enabled = !AppModel.connecting) {
+                Button(login, Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
                     Text("Connect Instagram account", Modifier.padding(vertical = if (large) 8.dp else 0.dp),
                         style = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold), textAlign = TextAlign.Center)
                 }

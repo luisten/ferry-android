@@ -138,10 +138,8 @@ private fun App() {
     val screen = stack.last()
     val naming = AppModel.naming
     when {
-        screen is Screen.Login -> LoginScreen { cookies ->
-            pop()
-            cookies?.let { AppModel.login(it, screen.relogin) }
-        }
+        // The login's answer can come after the stack changed (a notification opened a chat): only the login goes.
+        screen is Screen.Login -> LoginScreen(screen.relogin, close = ::pop, connected = { stack = stack.filterNot { it is Screen.Login } })
         // O5, then O6: a new account gets its name, colour and mark before anything else.
         naming != null && naming in AppModel.loginIDs -> NameAccountScreen(naming) { addAnother ->
             AppModel.naming = null

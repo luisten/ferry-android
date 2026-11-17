@@ -59,7 +59,7 @@ object AppModel {
     var initialSyncDone by mutableStateOf(false); private set
     /** A new login is with the engine. */
     var connecting by mutableStateOf(false); private set
-    /** Why the last new login failed, in Instagram's or the engine's words. */
+    /** Why the last login failed, in Instagram's or the engine's words. */
     var loginError by mutableStateOf<String?>(null); private set
     /** A notification's chat to open (MainActivity's intent). */
     var openRoom by mutableStateOf<String?>(null)
@@ -223,8 +223,9 @@ object AppModel {
     /**
      * The cookies the login web view collected (the user just logged in): a new account, or a fresh session for
      * `relogin` (A3). Finishing as a different account than the one being fixed is refused, with who to log in as.
+     * `done` gets why it failed, or null.
      */
-    fun login(cookies: Map<String, String>, relogin: String? = null) {
+    fun login(cookies: Map<String, String>, relogin: String? = null, done: (error: String?) -> Unit) {
         connecting = true
         loginError = null
         val payload = json.encodeToString(cookies).encodeToByteArray()
@@ -233,6 +234,7 @@ object AppModel {
             main.post {
                 connecting = false
                 connected(null, result, relogin)
+                done(loginError)
             }
         }
     }
@@ -725,10 +727,9 @@ object AppModel {
         if (isNew) EngineService.start(appContext)
     }
 
-    /** On Welcome when there's no account yet, else as the screen's notice. */
+    /** The login screen shows it, with "Try again". */
     private fun loginFailed(message: String) {
         loginError = message
-        if (accounts.isNotEmpty()) actionError = message
     }
 
     /** A connection that failed; after a passing one the engine tries again every 30 s by itself (`Login`, `LoginFailed`). */
