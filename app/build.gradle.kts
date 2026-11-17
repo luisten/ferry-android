@@ -13,11 +13,33 @@ android {
         applicationId = "fi.ferry.messenger"
         minSdk = 26 // build-engine.sh's API level
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 17 // +1 for every release, never down: a phone refuses an "update" with a lower one (decision A25)
+        versionName = "1.7" // the iPhone app's version this one matches
         ndk { abiFilters += "arm64-v8a" } // the only engine build-engine.sh makes (every phone of the last years)
     }
     buildFeatures { compose = true }
+    // The release key stays outside the repo: its four details are Gradle properties in the developer's own
+    // ~/.gradle/gradle.properties (FERRY_RELEASE_STORE_FILE, _STORE_PASSWORD, _KEY_ALIAS, _KEY_PASSWORD). Without them
+    // the release build is simply unsigned (and won't install); debug builds don't use this and are unaffected.
+    val releaseKey = listOf("STORE_FILE", "STORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD")
+        .associateWith { providers.gradleProperty("FERRY_RELEASE_$it").orNull }
+    signingConfigs {
+        if (releaseKey.values.all { it != null }) create("release") {
+            storeFile = file(releaseKey.getValue("STORE_FILE")!!)
+            storePassword = releaseKey.getValue("STORE_PASSWORD")
+            keyAlias = releaseKey.getValue("KEY_ALIAS")
+            keyPassword = releaseKey.getValue("KEY_PASSWORD")
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            // No R8 and no resource shrinking: the engine's JNI bridge names fi.ferry.core.IGCore (CLAUDE.md "The engine"),
+            // and renaming or removing it would break every call into the engine.
+            isMinifyEnabled = false
+            isShrinkResources = false
+            signingConfig = signingConfigs.findByName("release")
+        }
+    }
     sourceSets.getByName("main").jniLibs.directories += "build/engine/jniLibs"
 }
 

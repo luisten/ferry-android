@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -40,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -50,6 +53,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,6 +76,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,6 +87,7 @@ import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.Inbox.Folder
 import fi.ferry.messenger.model.Room
 import java.time.ZoneId
+import kotlin.math.abs
 import kotlinx.coroutines.launch
 
 /** I1, the inbox (DESIGN §4, I1): account stack, title, Folders menu, scope bar, the Requests card, chat rows. */
@@ -103,6 +110,8 @@ fun InboxScreen(
     val searching = !query.isNullOrBlank()
     val list = if (searching) Inbox.search(rooms, query!!, scope, logins) else Inbox.rooms(rooms, scope, Folder.CHATS, logins)
     val newRequests = if (searching || !AppModel.initialSyncDone) emptyList() else Inbox.newRequests(rooms, scope, logins, AppModel.requestsSeen)
+    // No first load yet and Instagram isn't answering: say so instead of showing placeholders for good.
+    val unreachable = !AppModel.initialSyncDone && AppModel.syncFailures >= 2
     BackHandler(query != null) { query = null }
 
     Scaffold(
@@ -160,14 +169,16 @@ fun InboxScreen(
                     if (AppModel.initialSyncDone) {
                         items(list, key = { it.id }) { room ->
                             ArchiveActions(room, { openThread(room.id) }) { ChatRow(room, showsMark = scope == Inbox.Scope.All && multiAccount, times, it) }
-                            HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            HorizontalDivider(Modifier.padding(start = 86.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                         }
-                    } else {
+                    } else if (!unreachable) {
                         items(8) { PlaceholderRow() }
                     }
                 } }
             }
-            if (AppModel.initialSyncDone && list.isEmpty() && newRequests.isEmpty()) {
+            if (unreachable) Empty(Icons.offline, "Can't reach Instagram", "Retrying. Your chats appear when it's back.") {
+                FilledTonalButton(AppModel::restartSync) { Text("Try Again") }
+            } else if (AppModel.initialSyncDone && list.isEmpty() && newRequests.isEmpty()) {
                 when {
                     searching -> Empty(Icons.search, "No results for “${query!!.trim()}”", "Check the spelling or try a new search.")
                     else -> EmptyInbox(scope, identity?.name)
@@ -179,7 +190,10 @@ fun InboxScreen(
 
 /**
  * DESIGN I1/I4: a row swiped left, or its long press, archives it, or unarchives it in Archived (for TalkBack, an
- * action). Requests have neither: they stay in Requests either way.
+ * action). Requests have neither: they stay in Requests either way. iOS 1.7: swiped right, or from the same menu (before
+ * Archive), Mark as Unread on a read chat and Mark as Read on one marked here, this phone only; neither on a chat
+ * Instagram has unread (opening it reads it, and "Read" from here would have to send "Seen"). A swipe right starts
+ * inside the row: from the screen's left edge it's Android's back (decision A28).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -190,34 +204,68 @@ fun ArchiveActions(room: Room, open: () -> Unit, row: @Composable (Modifier) -> 
     val archived = folder == Folder.ARCHIVED
     val label = if (archived) "Unarchive" else "Archive"
     val act = { menu = false; AppModel.setArchived(!archived, room) }
+    val marked = room.isMarkedUnread
+    val unreadLabel = if (!room.isUnread || marked) (if (marked) "Mark as Read" else "Mark as Unread") else null
+    val unreadIcon = if (marked) Icons.markRead else Icons.markUnread
+    val mark = { menu = false; AppModel.setMarkedUnread(!marked, room) }
     val swipe = rememberSwipeToDismissBoxState()
     val scope = rememberCoroutineScope()
+    // One `onDismiss` for the row's life: Material calls it again, while the row is still swiped, whenever it's handed a
+    // new one, and a row that stays (marked unread) is recomposed by the change: it flipped back and forth for good.
+    val dismissed by rememberUpdatedState { value: SwipeToDismissBoxValue -> if (value == SwipeToDismissBoxValue.StartToEnd) mark() else act() }
+    val onDismiss = remember(swipe) { { value: SwipeToDismissBoxValue -> dismissed(value); scope.launch { swipe.reset() }; Unit } }
     // As iOS's full swipe: past the threshold it's done, and the row leaves the list (it snaps back if it stays).
-    SwipeToDismissBox(swipe, { SwipeAction(swipe, label, if (archived) Icons.unarchive else Icons.archive) }, enableDismissFromStartToEnd = false,
-        onDismiss = { act(); scope.launch { swipe.reset() } }) {
+    SwipeToDismissBox(
+        swipe,
+        {
+            if (swipe.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                if (unreadLabel != null) SwipeAction(swipe, unreadLabel, unreadIcon, start = true, fill = swipeUnread, ink = Color.White)
+            } else SwipeAction(swipe, label, if (archived) Icons.unarchive else Icons.archive)
+        },
+        enableDismissFromStartToEnd = unreadLabel != null,
+        onDismiss = onDismiss,
+    ) {
         Box {
             row(Modifier.combinedClickable(onClick = open, onLongClick = { menu = true })
-                .semantics { customActions = listOf(CustomAccessibilityAction(label) { act(); true }) })
+                .semantics {
+                    customActions = listOfNotNull(
+                        unreadLabel?.let { CustomAccessibilityAction(it) { mark(); true } },
+                        CustomAccessibilityAction(label) { act(); true },
+                    )
+                })
             DropdownMenu(menu, { menu = false }, offset = DpOffset(86.dp, 0.dp)) {
+                unreadLabel?.let { DropdownMenuItem({ Text(it) }, mark, leadingIcon = { Icon(unreadIcon, null) }) }
                 DropdownMenuItem({ Text(label) }, act, leadingIcon = { Icon(if (archived) Icons.unarchive else Icons.archive, null) })
             }
         }
     }
 }
 
-/** What a left swipe uncovers, at the row's right: grey, never an account's colour. Only as wide as the swipe, so the
- * row's own background (the scope's wash) stays. */
+/**
+ * What a swipe uncovers: at the row's right for a left swipe, at its left (`start`) for a right one. Grey, never an
+ * account's colour. Only as wide as the swipe, so the row's own background (the scope's wash) stays.
+ */
 @Composable
-private fun RowScope.SwipeAction(swipe: SwipeToDismissBoxState, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    val width = with(LocalDensity.current) { (-runCatching { swipe.requireOffset() }.getOrDefault(0f)).coerceAtLeast(0f).toDp() }
-    Spacer(Modifier.weight(1f))
-    Box(Modifier.fillMaxHeight().width(width).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+private fun RowScope.SwipeAction(
+    swipe: SwipeToDismissBoxState, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, start: Boolean = false,
+    fill: Color = swipeArchive, ink: Color = Color.White,
+) {
+    val width = with(LocalDensity.current) { abs(runCatching { swipe.requireOffset() }.getOrDefault(0f)).toDp() }
+    if (!start) Spacer(Modifier.weight(1f))
+    Box(Modifier.fillMaxHeight().width(width).background(fill), contentAlignment = Alignment.Center) {
         if (width > 64.dp) Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Icon(icon, null, Modifier.size(22.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            Icon(icon, null, Modifier.size(22.dp), tint = ink)
+            Text(label, style = MaterialTheme.typography.labelMedium, color = ink, maxLines = 1)
         }
     }
+    if (start) Spacer(Modifier.weight(1f))
 }
+
+/** iOS's `swipeArchive`: neutral and dark, under white (Archive and Unarchive). */
+private val swipeArchive: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF3A3A3C) else Color(0xFF1C1C1E)
+
+/** iOS's `swipeUnread` (decision A20): a neutral grey, set apart from Archive's, under white. */
+private val swipeUnread: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF636366) else Color(0xFF48484A)
 
 /** Everything archived or in General isn't "no chats yet": say where they went. */
 @Composable
@@ -239,7 +287,7 @@ private fun EmptyInbox(scope: Inbox.Scope, name: String?) {
 }
 
 @Composable
-fun Empty(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, text: String) {
+fun Empty(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, text: String, action: (@Composable () -> Unit)? = null) {
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(12.dp))
@@ -247,6 +295,7 @@ fun Empty(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, 
         Spacer(Modifier.height(6.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        action?.let { Spacer(Modifier.height(16.dp)); it() }
     }
 }
 
@@ -452,15 +501,45 @@ private fun RequestsCard(requests: List<Room>, showsMarks: Boolean, open: () -> 
         }
         Column(Modifier.weight(1f)) {
             Text(Inbox.requestsCardTitle(requests.size), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                requests.forEachIndexed { i, room ->
-                    if (showsMarks) identityOf(room)?.let { AccountMark(it, 14.dp) }
-                    Text(room.name + if (i < requests.size - 1) "," else "", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                }
-            }
+            // Every name if they fit, else the first two or one and "+N" (rather than cutting each name short), as iOS.
+            val counts = listOf(requests.size, 2, 1).filter { it <= requests.size }.distinct()
+            FirstThatFits(counts.size) { i -> Names(requests, counts[i], showsMarks, last = i == counts.lastIndex) }
         }
         Icon(Icons.chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** The first `count` names of the Requests card, then "+N" for the rest; `last` (the last resort) may cut a name short. */
+@Composable
+private fun Names(requests: List<Room>, shown: Int, marks: Boolean, last: Boolean) {
+    val style = MaterialTheme.typography.bodySmall
+    val grey = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        requests.take(shown).forEachIndexed { i, room ->
+            if (marks) identityOf(room)?.let { AccountMark(it, 14.dp) }
+            Text(room.name + if (i < shown - 1) "," else "", Modifier.then(if (last) Modifier.weight(1f, fill = false) else Modifier),
+                style = style, color = grey, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+        }
+        // The mark keeps "+1" from reading "1+" on a right-to-left phone.
+        if (shown < requests.size) Text("\u200E+${requests.size - shown}", style = style.copy(fontFeatureSettings = "tnum"), color = grey, maxLines = 1)
+    }
+}
+
+/**
+ * iOS's `ViewThatFits(in: .horizontal)`: the first of `count` options that fits the width on one line; the last one when
+ * none does (it is measured within the width, so it cuts itself short).
+ */
+@Composable
+private fun FirstThatFits(count: Int, option: @Composable (Int) -> Unit) {
+    SubcomposeLayout { constraints ->
+        var chosen = subcompose(0) { option(0) }.first().measure(constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity))
+        var i = 0
+        while (chosen.width > constraints.maxWidth && i < count - 1) {
+            i++
+            val unbounded = if (i == count - 1) constraints.copy(minWidth = 0) else constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity)
+            chosen = subcompose(i) { option(i) }.first().measure(unbounded)
+        }
+        layout(chosen.width, chosen.height) { chosen.place(0, 0) }
     }
 }
 
@@ -476,7 +555,7 @@ fun ChatRow(room: Room, showsMark: Boolean, times: Inbox.TimeFormats, modifier: 
     // "Kivo Studio, via Tamo account, 2 unread, You sent a reel, 9:41" (DESIGN §3.7).
     val spoken = listOfNotNull(
         room.name, if (AppModel.accounts.size > 1) identity?.let { "via ${it.name} account" } else null,
-        maxOf(room.notificationCount, room.highlightCount).takeIf { it > 0 }?.let { "$it unread" },
+        maxOf(room.notificationCount, room.highlightCount).let { if (it > 0) "$it unread" else if (room.isMarkedUnread) "marked unread" else null },
         if (typing) "typing" else preview?.text, time,
     ).filter { it.isNotEmpty() }.joinToString(", ")
     Row(

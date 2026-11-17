@@ -2,7 +2,7 @@ module github.com/luisten/ferry-messenger-android
 
 go 1.26.0
 
-toolchain go1.27.1
+toolchain go1.27.3
 
 // The same as core's own go.mod: replace directives don't carry over from dependencies.
 replace github.com/imroc/req/v3 => github.com/beeper/req/v3 v3.0.0-20260808092153-100cef0a2fbd
@@ -21,7 +21,7 @@ require (
 	github.com/icholy/digest v1.2.0 // indirect
 	github.com/imroc/req/v3 v3.56.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
-	github.com/luisten/ferry-messenger/core v0.0.0-20261021170704-a2a0c446e6c9 // indirect
+	github.com/luisten/ferry-messenger/core v0.0.0-20261112152829-70aa388f2ba4 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261 // indirect
@@ -40,7 +40,7 @@ require (
 	go.mau.fi/zeroconfig v0.2.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect

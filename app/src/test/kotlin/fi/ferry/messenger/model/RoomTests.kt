@@ -1,5 +1,7 @@
 package fi.ferry.messenger.model
 
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -13,6 +15,38 @@ import org.junit.Test
  */
 class RoomTests {
     private val dm = Fixture.event("state_bridge_dm").content
+
+    /**
+     * Android's own (R1-F2): every change bumps the room's version and every accessor reads it, so a screen handed the
+     * same Room again (Compose skips it) still sees the change. An inbox row kept its old preview before.
+     */
+    @Test fun everyChangeIsSeenByWhatReadsTheRoom() {
+        var reads = 0
+        val make = Room.Version.make
+        Room.Version.make = { object : Room.Version() { override var count = 0; get() = field.also { reads++ } } }
+        try {
+            val room = Room("!r")
+            fun changes(change: () -> Unit) = room.changes.let { before -> change(); room.changes - before }
+            val event = Event("m.room.message", buildJsonObject { put("msgtype", "m.text"); put("body", "hi") }, "\$1", "@a", originServerTS = 5)
+            assertEquals(1, changes { room.apply(JoinedRoom(timeline = JoinedRoom.Timeline(listOf(event), limited = true, prevBatch = "p"))) })
+            assertEquals(1, changes { room.prepend(MessagesPage(emptyList(), null), "p") })
+            assertEquals(1, changes { room.addPending(PendingMessage("t", emptyObject, 6, PendingMessage.State.Sending)) })
+            assertEquals(1, changes { room.updatePending("t", PendingMessage.State.Failed("no")) })
+            assertEquals(1, changes { room.removePending("t") })
+            assertEquals(1, changes { room.addRelated(event) })
+            assertEquals(1, changes { room.tags = mapOf(Inbox.ARCHIVED_TAG to emptyObject) })
+            assertEquals(1, changes { room.requestAction = Room.RequestAction.ACCEPT })
+            // What the inbox's row reads goes through the version.
+            for (read in listOf<() -> Any?>({ room.lastMessage }, { room.isUnread }, { room.name }, { room.lastActivity }, { room.tags },
+                { room.typing }, { room.receipts }, { room.pending }, { room.prevBatch }, { room.reachedStart })) {
+                val before = reads
+                read()
+                assertTrue(reads > before)
+            }
+        } finally {
+            Room.Version.make = make
+        }
+    }
 
     // BridgeInfo
 

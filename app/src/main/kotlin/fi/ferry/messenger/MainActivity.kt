@@ -1,7 +1,11 @@
 package fi.ferry.messenger
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.ApplicationInfo
+import android.graphics.Bitmap
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,8 +16,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.content.FileProvider
 import fi.ferry.messenger.ui.AccountScreen
 import fi.ferry.messenger.ui.AccountsSheet
+import fi.ferry.messenger.ui.ConnectingScreen
 import fi.ferry.messenger.ui.FerryTheme
 import fi.ferry.messenger.ui.FolderScreen
 import fi.ferry.messenger.ui.InboxScreen
@@ -23,6 +29,8 @@ import fi.ferry.messenger.ui.NotificationsPrompt
 import fi.ferry.messenger.ui.ReloginDialog
 import fi.ferry.messenger.ui.ThreadScreen
 import fi.ferry.messenger.ui.Welcome
+import java.io.File
+import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -31,22 +39,73 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.Theme_Ferry_App) // from the launch theme (the manifest's) to the plain one, before the first frame
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Debug builds: `--ez demo true` shows made-up data only, and nothing connects (`Demo`); `--es request_room <room>`
         // has the engine treat that real chat as a request and hold back its sends (iOS's FERRY_DEBUG_AS_REQUEST).
         val debuggable = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-        // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska.
+        // With the demo, `--ez signed_out true` signs Kivo Studio out and `--ez naming true` opens O5 for Tamo Veska,
+        // `--ez connecting true` O4 then O5 (for Kivo, failed, with `signed_out`);
+        // `--ez incoming true` and `--ez reaction true` bring a message and a reaction 10 s in, `--ez busy true` many
+        // new messages in Harbor Coffee, `--ei group_older <n>` has the group page back from five messages (n pages
+        // of 20 made-up ones after its own), `--ei group_extra <n>` adds n unread messages to the group (see `Demo`),
+        // `--ez clipboard true` puts two photos on the clipboard to paste into a chat's field (iOS 1.7's paste).
         val demo = debuggable && intent.getBooleanExtra("demo", false)
         AppModel.start(applicationContext, demo, requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable },
             demoSignedOut = demo && intent.getBooleanExtra("signed_out", false),
             // A live account shown signed out (nothing reaches Instagram) until it logs in again: A3's live check.
             signedOut = intent.getStringExtra("signed_out_account")?.takeIf { debuggable && !demo },
             demoIncoming = demo && intent.getBooleanExtra("incoming", false),
-            demoBusy = demo && intent.getBooleanExtra("busy", false))
+            demoBusy = demo && intent.getBooleanExtra("busy", false),
+            demoReaction = demo && intent.getBooleanExtra("reaction", false),
+            demoGroupOlder = if (demo) intent.getIntExtra("group_older", 0) else 0,
+            demoGroupExtra = if (demo) intent.getIntExtra("group_extra", 0) else 0)
         AppModel.openRoom = intent.getStringExtra(OPEN_ROOM)
         if (demo && intent.getBooleanExtra("naming", false)) AppModel.naming = Demo.TAMO
+        if (demo && intent.getBooleanExtra("connecting", false)) Demo.connecting(intent.getBooleanExtra("signed_out", false)).let {
+            AppModel.justConnected = it
+            AppModel.naming = it
+        }
+        if (demo && intent.getBooleanExtra("clipboard", false)) demoClipboard()
+        if (demo) demoVideos()
         setContent { FerryTheme { App() } }
+    }
+
+    /** Two made-up 600 × 400 photos, one colour each, in the outgoing folder and on the clipboard as one clip. */
+    private fun demoClipboard() {
+        val uris = listOf(0xFF2F80ED.toInt(), 0xFFF2994A.toInt()).mapIndexed { i, colour ->
+            val file = File(File(cacheDir, "outgoing").apply { mkdirs() }, "demo-paste-${i + 1}.jpg")
+            val bitmap = Bitmap.createBitmap(600, 400, Bitmap.Config.ARGB_8888).apply { eraseColor(colour) }
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            FileProvider.getUriForFile(this, "$packageName.files", file)
+        }
+        val clip = ClipData("Demo photos", arrayOf("image/jpeg"), ClipData.Item(uris[0])).apply { addItem(ClipData.Item(uris[1])) }
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+    }
+
+    /**
+     * The demo's videos (`Demo.videos`) as already downloaded: a 6 s clip of debug builds' own (`src/debug/assets`),
+     * so the player can be checked without Instagram.
+     */
+    private fun demoVideos() = thread {
+        val clip = File(cacheDir, "demo-clip.mp4")
+        try {
+            assets.open("demo-clip.mp4").use { input -> clip.outputStream().use { input.copyTo(it) } }
+        } catch (_: java.io.IOException) {
+            return@thread
+        }
+        Demo.videos.forEach { MediaFiles.adopt(clip, it, "video/mp4") }
+        clip.delete()
+    }
+
+    /**
+     * Rotation, dark mode, font size (`configChanges`): no recreation, Compose redraws. The system bars' icons are set
+     * light or dark once by `enableEdgeToEdge`, so they're set again for the new mode.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        enableEdgeToEdge()
     }
 
     /** A notification tapped while Ferry was open (`singleTop`). */
@@ -102,12 +161,13 @@ private fun App() {
 
     val screen = stack.last()
     val naming = AppModel.naming
+    val justConnected = AppModel.justConnected
     when {
-        screen is Screen.Login -> LoginScreen { cookies ->
-            pop()
-            cookies?.let { AppModel.login(it, screen.relogin) }
-        }
-        // O5, then O6: a new account gets its name, colour and mark before anything else.
+        // The login's answer can come after the stack changed (a notification opened a chat): only the login goes.
+        screen is Screen.Login -> LoginScreen(screen.relogin, close = ::pop, connected = { stack = stack.filterNot { it is Screen.Login } })
+        // O4, O5, then O6: a new account connects, then gets its name, colour and mark before anything else.
+        justConnected != null && justConnected in AppModel.loginIDs ->
+            ConnectingScreen(justConnected, retry = { push(Screen.Login(relogin = justConnected)) }) { AppModel.justConnected = null }
         naming != null && naming in AppModel.loginIDs -> NameAccountScreen(naming) { addAnother ->
             AppModel.naming = null
             if (addAnother) push(Screen.Login())

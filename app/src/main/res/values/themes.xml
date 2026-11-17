@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Ferry" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- What the app lives in: `MainActivity` switches to it before anything is drawn, so the launch window isn't behind a resize. -->
+    <style name="Theme.Ferry.App" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/page</item>
+    </style>
+    <!-- The launch window (Android 8 to 11; 12+ has its own launch screen, values-v31): the launch colour and the mark. -->
+    <style name="Theme.Ferry" parent="Theme.Ferry.App">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
 </resources>

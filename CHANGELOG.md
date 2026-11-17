@@ -5,6 +5,10 @@ What changes for people who use the app, in plain words. The format is
 
 ## [Unreleased]
 
+## [1.7] - 2026-11-17
+
+The first version for friends: what the iPhone app has up to its 1.7.
+
 ### Added
 
 - Log in to Instagram on its own web page, inside the app.
@@ -14,8 +18,7 @@ What changes for people who use the app, in plain words. The format is
   card at the top of the list, with who's waiting but not what they wrote.
 - Search your chats by name.
 - Open a chat to read it: your messages in your account's colour, replies, reactions, edits, unsent messages, "Seen",
-  and in groups who wrote what and who has seen it. Scroll up for older messages. Photos, videos and voice messages
-  show as a label for now.
+  and in groups who wrote what and who has seen it. Scroll up for older messages.
 - Write back: send a message, reply to one, react (long press, or double tap for a heart), edit within 15 minutes,
   unsend, copy. Your message shows at once; if it can't be sent, tap it to try again. The other side sees when you're
   typing.
@@ -29,6 +32,16 @@ What changes for people who use the app, in plain words. The format is
 - Send photos, videos and GIFs (the + in the message bar), and voice messages (tap the mic, or hold it). Where a photo
   was taken never leaves your phone: location and other details are removed first.
 - A welcome screen, and after each login a name, colour and mark for the account, so its chats are easy to tell apart.
+- The welcome screen shows Ferry's ferry crossing the sea with two accounts aboard, and logging in, connecting, naming
+  an account, adding another and the Accounts pages look as they do on the iPhone. The login page says when it's
+  loading and connecting, and offers "Try again" when it can't connect.
+- The rest of the app looks as it does on the iPhone: Delete and Accept under each message request in the Requests list;
+  Chat Info and New Message on the same grey page and cards in light and dark; the inbox's banner with the account's
+  picture, "Can't reach Instagram" with Try Again when the first load can't connect, a darker Archive swipe, and the
+  requests card ending in "+2" instead of cutting a name; photos, videos and cards shaped like their bubble, a solid play
+  button on voice messages, an error sign on "Not sent", a one-line signed-out bar in a chat, and the account's colour on
+  the voice message's Send and held microphone. The app opens on a dark window in dark mode, and on the launch colour
+  before Android 12.
 - Accounts: see each account's state, rename it or change its colour and mark, log in again when Instagram signs you
   out (a banner and the chat say so), or remove an account from this phone.
 - Notifications for new messages, saying which of your accounts each one is for. Ferry stays connected in the
@@ -45,8 +58,32 @@ What changes for people who use the app, in plain words. The format is
 - Tap someone's picture in a group chat, or a member in Chat Info, to see a bigger picture, their name and @handle, and
   open their Instagram profile.
 - Share a photo from the full-screen viewer. Photos and videos sent together have Share All: touch and hold them.
+- The video player looks and works as on the iPhone: close and sound on/off at the top, a thin bar to skip through, and
+  at the bottom who posted a shared reel (with Open in Instagram), its caption (tap it for the rest), and who shared it
+  and when, with your account's tag. Swipe down or up to go back to the chat.
 - Swipe a chat left to archive it, or to bring it back from Archived.
 - Pull down the chat list to reconnect an account that couldn't connect.
 - Touch and hold an account in Accounts, then drag it, to change their order.
 - A link's preview shows its picture, and a tap on it opens the link.
 - Touching and holding a message brings up the reactions sooner.
+- When someone reacts to your message, the chat moves to the top of your inbox, unread, and says "Liked a message" or
+  "Reacted 😂 to your message", as in Instagram. Reactions don't send a notification.
+- Photos and videos taken with Instagram's own camera in a chat show as photos and videos when they're kept in the
+  chat.
+- Every message shows its time in the bubble, and each day starts with a chip ("Today", "Yesterday", then the weekday and date).
+  While you scroll, the day floats at the top and goes a second after you stop.
+- With TalkBack, each message says who sent it and when.
+- Links in messages, yours and theirs, are underlined and open when tapped. Touching and holding a message with a link
+  still opens its menu, and with TalkBack each link is one of the message's actions.
+- Reactions hang a little lower, so the message's time stays readable, and a row of reactions wider than a short
+  message of yours no longer moves the message out of line.
+- Swipe a message to the right to reply to it.
+- Mark a chat as unread from the chat list: swipe right on it, or touch and hold it. This is on this phone only;
+  Instagram isn't told, and its own app still shows the chat as read.
+- Pick up to 10 photos and videos at once with +, or paste them into the message field or insert them from the keyboard.
+  They're sent one after another, in the order you picked them, and then your text.
+- Take a photo or record a video with the camera from + in a chat (Take Photo, Record Video, Choose from Library).
+  Ferry doesn't need permission to use the camera.
+- Turning the phone, switching to dark mode or changing the text size keeps you in the chat, with what you were
+  writing.
+- The chat list shows a new message as it arrives: the row's words, time and unread dot change at once.

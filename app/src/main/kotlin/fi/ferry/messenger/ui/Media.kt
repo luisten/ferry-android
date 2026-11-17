@@ -11,37 +11,53 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.format.DateUtils
 import android.webkit.MimeTypeMap
 import android.widget.ImageView
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,22 +82,42 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -89,6 +125,7 @@ import androidx.media3.ui.compose.ContentFrame
 import fi.ferry.messenger.AppModel
 import fi.ferry.messenger.MediaFiles
 import fi.ferry.messenger.VoicePlayer
+import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.MediaInfo
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessageKind
@@ -96,20 +133,27 @@ import fi.ferry.messenger.model.MessageKind.ShareState
 import fi.ferry.messenger.model.MessageKind.ShareType
 import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.ShareCaption
+import fi.ferry.messenger.model.Timeline.GroupPosition
 import java.io.File
 import kotlin.concurrent.thread
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-/** What a full-screen viewer shows: a photo (a GIF plays there), or a video. */
+/** What a full-screen viewer shows: a photo (a GIF plays there), or a video (iOS's `MediaViewerItem`). */
 sealed interface Viewer {
     data class Photo(val file: File, val animated: Boolean) : Viewer
-    data class Video(val file: File) : Viewer
+    /** `sender`: who shared it, for "Shared by Kivo · 9:31 AM" (DESIGN M1). */
+    data class Video(val file: File, val message: Message, val sender: String) : Viewer
 }
 
-/** What the thread lends its media cards: its room (for links and "Load video"), whether GIFs may play, the viewer. */
-class MediaContext(val room: Room, val autoplay: Boolean, val open: (Viewer) -> Unit)
+/**
+ * What the thread lends its media cards: its room (for links and "Load video"), whether GIFs may play, a sender's
+ * first name ("You" for us) for the player, the viewer.
+ */
+class MediaContext(val room: Room, val autoplay: Boolean, val firstName: (String) -> String, val open: (Viewer) -> Unit)
 
 val LocalMedia = compositionLocalOf<MediaContext?> { null }
 
@@ -121,6 +165,9 @@ val LocalMedia = compositionLocalOf<MediaContext?> { null }
 class TapTarget {
     var action: (() -> Unit)? = null
     var hold: (() -> Unit)? = null
+    /** The message's own tap and double tap (a heart, when it may get one), for a text with links that takes its touches. */
+    var click: () -> Unit = {}
+    var heart: (() -> Unit)? = null
 }
 
 val LocalTap = compositionLocalOf<TapTarget?> { null }
@@ -157,22 +204,46 @@ private fun fetch(url: String, mimetype: String?, room: Room, failed: () -> Unit
     }
 }
 
-/** DESIGN §6.3–6.8: the card for a message's media; the one-line placeholder for what has none to show. */
+/**
+ * DESIGN §6.3–6.8: the card for a message's media; the one-line placeholder for what has none to show. `time` (iOS 1.7):
+ * on a dark capsule in a picture's corner, and beside a card's own words where they reach the bottom (a placeholder's
+ * label, a post's caption, a pile's count, a voice note's length), never over them (A35).
+ */
 @Composable
-fun MediaBubble(message: Message, kind: MessageKind, placeholder: @Composable () -> Unit) {
+fun MediaBubble(message: Message, kind: MessageKind, time: String?, shape: Shape, placeholder: @Composable (time: String?) -> Unit) {
     val media = MediaInfo(message.content)
     // Instagram reports no upload progress: a spinner until it answers.
     val uploading = message.isLocalEcho && message.status == Message.Status.Sending
     when {
-        media.album.size >= 2 -> AlbumPile(message, media)
-        kind == MessageKind.Voice || kind == MessageKind.Audio -> if (media.url != null) VoiceBubble(message, media) else placeholder()
+        media.album.size >= 2 -> AlbumPile(message, media, time)
+        kind == MessageKind.Voice || kind == MessageKind.Audio -> if (media.url != null) VoiceBubble(message, media, time, shape) else placeholder(time)
         (kind == MessageKind.Image || kind == MessageKind.Gif || kind == MessageKind.Sticker) && media.url != null ->
-            PhotoCard(message.id, media, sticker = kind == MessageKind.Sticker, tapHere = true, uploading = uploading)
-        kind == MessageKind.Video && media.url != null -> VideoCard(message, media, share = null, tapHere = true, uploading = uploading)
-        kind is MessageKind.Share && kind.type == ShareType.POST && media.url != null -> PostCard(message, media)
-        kind is MessageKind.Share && (kind.type == ShareType.REEL || kind.type == ShareType.STORY) -> VideoCard(message, media, kind, tapHere = true)
-        else -> placeholder() // view once, files, other shares, the mailbox's copies before the thread is read
+            Timed(time) { PhotoCard(message.id, media, sticker = kind == MessageKind.Sticker, tapHere = true, shape = shape, uploading = uploading) }
+        kind == MessageKind.Video && media.url != null -> Timed(time) { VideoCard(message, media, share = null, tapHere = true, shape = shape, uploading = uploading) }
+        kind is MessageKind.Share && kind.type == ShareType.POST && media.url != null -> PostCard(message, media, time, shape)
+        kind is MessageKind.Share && (kind.type == ShareType.REEL || kind.type == ShareType.STORY) -> Timed(time) { VideoCard(message, media, kind, tapHere = true, shape = shape) }
+        else -> placeholder(time) // view once, files, other shares, the mailbox's copies before the thread is read
     }
+}
+
+/** A picture with the time in its bottom end corner. */
+@Composable
+private fun Timed(time: String?, card: @Composable () -> Unit) {
+    Box {
+        card()
+        time?.let { CardTime(it, Modifier.align(Alignment.BottomEnd), spoken = true) }
+    }
+}
+
+/**
+ * iOS 1.7: a card's time (a photo, video, link preview) on a dark capsule in its corner, readable over any picture.
+ * `spoken`: TalkBack reads it after the card's own words; a link's bubble says its time itself.
+ */
+@Composable
+fun CardTime(time: String, modifier: Modifier, spoken: Boolean) {
+    Text(time, modifier.padding(6.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape).padding(horizontal = 6.dp, vertical = 2.dp)
+        .clearAndSetSemantics { if (spoken) contentDescription = time },
+        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"), color = Color.White)
 }
 
 /** Fits `w`×`h` inside `maxW`×`maxH` (dp); 200×200 without a size. */
@@ -182,7 +253,8 @@ private fun fit(w: Double?, h: Double?, maxW: Float, maxH: Float): Pair<Dp, Dp> 
     return (w * scale).toFloat().dp to (h * scale).toFloat().dp
 }
 
-private fun animationsOff(context: android.content.Context) =
+/** Android's "Remove animations" (iOS's Reduce Motion). */
+internal fun animationsOff(context: android.content.Context) =
     Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
 
 /** GIFs that have played their three times this launch: they rest on their first frame. */
@@ -193,7 +265,7 @@ private val playedGIFs = mutableSetOf<String>()
  * launch, then rests; a sticker loops. Neither plays in a request or with animations off. Tap: full screen.
  */
 @Composable
-private fun PhotoCard(id: String, media: MediaInfo, sticker: Boolean, tapHere: Boolean, uploading: Boolean = false, modifier: Modifier = Modifier) {
+private fun PhotoCard(id: String, media: MediaInfo, sticker: Boolean, tapHere: Boolean, shape: Shape, uploading: Boolean = false, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val ctx = LocalMedia.current
     val url = media.url ?: return
@@ -210,7 +282,7 @@ private fun PhotoCard(id: String, media: MediaInfo, sticker: Boolean, tapHere: B
     val still = Pictures.load(if (media.isAnimated) media.thumbnailURL ?: url else url, px)
     Box(
         // A sticker has no card, once it's there: till then the same grey as a photo's.
-        modifier.size(w, h).clip(RoundedCornerShape(if (sticker && still != null) 0.dp else 18.dp))
+        modifier.size(w, h).clip(if (sticker && still != null) RectangleShape else shape)
             .background(if (sticker && still != null) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant)
             .then(if (tapHere) Modifier else Modifier.ownTap(open))
             .semantics { contentDescription = if (sticker) "Sticker" else if (media.isAnimated) "GIF" else "Photo" },
@@ -271,8 +343,9 @@ private fun Overlay(progress: Float?, failed: Boolean) {
 
 @Composable
 private fun PlayGlyph() {
-    Box(Modifier.size(44.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape), contentAlignment = Alignment.Center) {
-        Icon(Icons.play, null, Modifier.size(26.dp), tint = Color.White)
+    // iOS's video card, GIF play button included: 56 on black at 65%.
+    Box(Modifier.size(56.dp).background(Color.Black.copy(alpha = 0.65f), CircleShape), contentAlignment = Alignment.Center) {
+        Icon(Icons.play, null, Modifier.size(30.dp), tint = Color.White)
     }
 }
 
@@ -281,14 +354,18 @@ private fun PlayGlyph() {
  * out, one card each, until "Show less".
  */
 @Composable
-private fun AlbumPile(message: Message, media: MediaInfo) {
+private fun AlbumPile(message: Message, media: MediaInfo, time: String?) {
     var open by rememberSaveable(message.id) { mutableStateOf(false) }
     val items = media.album.map(::MediaInfo)
     if (open) {
         OnTap { }
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            items.forEach { item ->
-                if (item.isVideo) VideoCard(message, item, share = null, tapHere = false) else PhotoCard(message.id, item, sticker = false, tapHere = false)
+        // Stacked like a run of bubbles (iOS): first, middle and last corners, 2 dp apart.
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            items.forEachIndexed { i, item ->
+                val shape = bubbleShape(if (i == 0) GroupPosition.FIRST else if (i == items.lastIndex) GroupPosition.LAST else GroupPosition.MIDDLE, message.isOwn)
+                Timed(time.takeIf { i == items.lastIndex }) {
+                    if (item.isVideo) VideoCard(message, item, share = null, tapHere = false, shape = shape) else PhotoCard(message.id, item, sticker = false, tapHere = false, shape = shape)
+                }
             }
             TextButton({ open = false }) { Text("Show less") }
         }
@@ -300,12 +377,19 @@ private fun AlbumPile(message: Message, media: MediaInfo) {
     Box(Modifier.padding(8.dp).semantics { contentDescription = "${media.albumLabel}, double tap to show them" }) {
         val angles = listOf(0f, -3f, 3f, -6f, 6f)
         items.take(5).withIndex().reversed().forEach { (i, item) ->
-            Box(Modifier.size(w, h).rotate(angles[i]).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+            Box(Modifier.size(w, h).rotate(angles[i]).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
                 Pictures.load(item.previewURL, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             }
         }
-        Text(media.albumLabel, Modifier.align(Alignment.BottomStart).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
-            .padding(horizontal = 10.dp, vertical = 4.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+        // The count and the time share the bottom edge, side by side.
+        Box(Modifier.matchParentSize()) {
+            Row(Modifier.align(Alignment.BottomStart).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(media.albumLabel, Modifier.padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 4.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.weight(1f))
+                time?.let { CardTime(it, Modifier.padding(end = 2.dp), spoken = true) }
+            }
+        }
         // "Share All" under way: the set's downloads so far.
         val downloading = items.mapNotNull { item -> item.url?.let { MediaFiles.progress[it] } }
         if (downloading.isNotEmpty()) Box(Modifier.align(Alignment.Center)) { Overlay(downloading.average().toFloat(), failed = false) }
@@ -317,7 +401,7 @@ private fun AlbumPile(message: Message, media: MediaInfo) {
  * 9:16 and 16:9. Shares start as "Load video" (a read: the engine fetches the reel or story), then open as if tapped.
  */
 @Composable
-private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Share?, tapHere: Boolean, uploading: Boolean = false) {
+private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Share?, tapHere: Boolean, shape: Shape, uploading: Boolean = false) {
     val ctx = LocalMedia.current
     val caption = ShareCaption.of(message.content)
     val unresolved = share?.state == ShareState.UNRESOLVED
@@ -338,7 +422,7 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
         val room = ctx?.room ?: return
         fetch(u, media.mimetype, room, { failed = "Couldn't get it." }) {
             failed = null
-            ctx.open(if (media.isVideo) Viewer.Video(it) else Viewer.Photo(it, animated = false))
+            ctx.open(if (media.isVideo) Viewer.Video(it, message, ctx.firstName(message.sender)) else Viewer.Photo(it, animated = false))
         }
     }
     // After "Load video", the share's link arrives as an edit: then it opens as if tapped.
@@ -367,15 +451,18 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
     }
     if (tapHere) OnTap(tap)
     val px = with(LocalDensity.current) { maxOf(w, h).roundToPx() }
-    Box(Modifier.size(w, h).clip(RoundedCornerShape(18.dp)).background(Color.Black).then(if (tapHere) Modifier else Modifier.ownTap(tap))) {
+    Box(Modifier.size(w, h).clip(shape).background(Color(0xFF292929)).then(if (tapHere) Modifier else Modifier.ownTap(tap))) {
         Pictures.load(media.thumbnailURL, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         if (share != null) {
-            val author = caption.author?.let { if (share.type == ShareType.STORY) "Story · @$it" else "@$it" } ?: share.type.label
-            Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
-                .padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.of(share.type.glyph), null, Modifier.size(16.dp), tint = Color.White)
-                Text(author, Modifier.padding(start = 6.dp), color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
+            // iOS: "@author" ("Story · @author"), a reel's badge at the end, on a fade from the top.
+            val author = caption.author?.let { if (share.type == ShareType.STORY) "Story · @$it" else "@$it" } ?: "Story".takeIf { share.type == ShareType.STORY }
+            Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent)))
+                .padding(start = 9.dp, end = 9.dp, top = 9.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(author.orEmpty(), Modifier.weight(1f), color = Color.White, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (share.type == ShareType.REEL) Box(Modifier.size(26.dp).background(Color.Black.copy(alpha = 0.65f), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.reels, null, Modifier.size(15.dp), tint = Color.White)
+                }
             }
         }
         caption.caption?.takeIf { it.isNotBlank() }?.let {
@@ -385,7 +472,8 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
                 style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         media.duration?.let {
-            Text(clock(it), Modifier.align(Alignment.BottomEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
+            // Bottom start: the bubble's time has the bottom end (iOS 1.7).
+            Text(clock(it), Modifier.align(Alignment.BottomStart).padding(8.dp).background(Color.Black.copy(alpha = 0.55f), CircleShape)
                 .padding(horizontal = 8.dp, vertical = 2.dp), color = Color.White, style = MaterialTheme.typography.labelSmall)
         }
         Box(Modifier.align(Alignment.Center)) {
@@ -396,7 +484,7 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
                         style = MaterialTheme.typography.labelMedium)
                 }
                 failed != null -> Pill(Icons.retry, "Try again")
-                unresolved -> Pill(Icons.play, if (share?.type == ShareType.STORY) "Load story" else "Load video")
+                unresolved -> Pill(Icons.download, if (share?.type == ShareType.STORY) "Load story" else "Load video")
                 uploading -> Spinner()
                 progress != null -> Overlay(progress, failed = false)
                 else -> PlayGlyph()
@@ -407,7 +495,7 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
 
 @Composable
 private fun Pill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
-    Row(Modifier.background(Color.Black.copy(alpha = 0.55f), CircleShape).padding(horizontal = 14.dp, vertical = 8.dp),
+    Row(Modifier.heightIn(min = 36.dp).background(Color.Black.copy(alpha = 0.65f), CircleShape).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(18.dp), tint = Color.White)
         Text(label, Modifier.padding(start = 6.dp), color = Color.White, style = MaterialTheme.typography.labelLarge)
@@ -416,7 +504,7 @@ private fun Pill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: S
 
 /** DESIGN §6.7: a shared post, 240 wide: who posted it, its picture (between 16:9 and 4:5) and two lines of caption. */
 @Composable
-private fun PostCard(message: Message, media: MediaInfo) {
+private fun PostCard(message: Message, media: MediaInfo, time: String?, shape: Shape) {
     val ctx = LocalMedia.current
     val caption = ShareCaption.of(message.content)
     val url = media.url ?: return
@@ -424,18 +512,25 @@ private fun PostCard(message: Message, media: MediaInfo) {
     OnTap { if (ctx != null) fetch(url, media.mimetype, ctx.room, { failed = true }) { failed = false; ctx.open(Viewer.Photo(it, animated = false)) } }
     val ratio = ((media.height ?: 1.0) / (media.width ?: 1.0)).coerceIn(0.5625, 1.25)
     val px = with(LocalDensity.current) { 240.dp.roundToPx() }
-    Column(Modifier.width(240.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.of(fi.ferry.messenger.model.Glyph.POST), null, Modifier.size(16.dp))
-            Text(caption.author?.let { "@$it" } ?: "Post", Modifier.padding(start = 6.dp), style = MaterialTheme.typography.labelLarge,
+    // iOS: the bubble's colour (the account's on ours) and its text colour; the author, then the post's glyph at the end.
+    val (fill, ink) = cardColors(message)
+    Column(Modifier.width(240.dp).clip(shape).background(fill)) {
+        Row(Modifier.heightIn(min = 36.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(caption.author?.let { "@$it" } ?: "Post", Modifier.weight(1f), color = ink, style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.of(fi.ferry.messenger.model.Glyph.POST), null, Modifier.padding(start = 8.dp).size(16.dp), tint = ink.copy(alpha = 0.7f))
         }
         Box(Modifier.fillMaxWidth().height((240 * ratio).toFloat().dp).background(Color.Black), contentAlignment = Alignment.Center) {
             Pictures.load(url, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             Overlay(MediaFiles.progress[url], failed)
+            if (caption.caption.isNullOrBlank()) time?.let { CardTime(it, Modifier.align(Alignment.BottomEnd), spoken = true) }
         }
         caption.caption?.takeIf { it.isNotBlank() }?.let {
-            Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            // The time beside the caption, not over its end.
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(it, Modifier.weight(1f).padding(12.dp), color = ink, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                time?.let { t -> CardTime(t, Modifier, spoken = true) }
+            }
         }
     }
 }
@@ -445,13 +540,14 @@ private fun PostCard(message: Message, media: MediaInfo) {
  * and while it plays the speed. Drag the bars to seek.
  */
 @Composable
-private fun VoiceBubble(message: Message, media: MediaInfo) {
+private fun VoiceBubble(message: Message, media: MediaInfo, time: String?, shape: Shape) {
     val context = LocalContext.current
     val ctx = LocalMedia.current
     val own = message.isOwn
-    val identity = ctx?.room?.let { identityOf(it) }
-    val fill = if (own) identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground else Bubbles.incoming
-    val ink = if (own) Color.White else MaterialTheme.colorScheme.onBackground
+    val (fill, ink) = cardColors(message)
+    // iOS's play disc is solid: white with the account's colour on ours, the text colour with the page's on theirs.
+    val disc = if (own) Color.White else ink
+    val glyph = if (own) fill else MaterialTheme.colorScheme.background
     val url = media.url ?: return
     val duration = media.duration ?: 0L
     val loaded = VoicePlayer.current == message.id
@@ -471,15 +567,15 @@ private fun VoiceBubble(message: Message, media: MediaInfo) {
     OnTap(toggle)
     val heights = remember(message.id) { voiceBars(message.id, BARS) }
     Row(
-        Modifier.width(240.dp).heightIn(min = 48.dp).background(fill, RoundedCornerShape(24.dp)).padding(horizontal = 8.dp, vertical = 8.dp)
+        Modifier.width(240.dp).heightIn(min = 48.dp).background(fill, shape).padding(horizontal = 8.dp, vertical = 8.dp)
             .semantics { contentDescription = "Voice message, ${clock(duration)}" },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(Modifier.size(32.dp).background(ink.copy(alpha = 0.18f), CircleShape).clickable(onClick = toggle), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(32.dp).background(disc, CircleShape).clickable(onClick = toggle), contentAlignment = Alignment.Center) {
             when {
-                MediaFiles.progress[url] != null -> CircularProgressIndicator(Modifier.size(18.dp), color = ink, strokeWidth = 2.dp)
-                failed -> Icon(Icons.retry, "Try again", Modifier.size(18.dp), tint = ink)
-                else -> Icon(if (playing) Icons.pause else Icons.play, if (playing) "Pause" else "Play", Modifier.size(20.dp), tint = ink)
+                MediaFiles.progress[url] != null -> CircularProgressIndicator(Modifier.size(18.dp), color = glyph, strokeWidth = 2.dp)
+                failed -> Icon(Icons.retry, "Try again", Modifier.size(18.dp), tint = glyph)
+                else -> Icon(if (playing) Icons.pause else Icons.play, if (playing) "Pause" else "Play", Modifier.size(20.dp), tint = glyph)
             }
         }
         val done = if (duration > 0) position.toFloat() / duration else 0f
@@ -498,12 +594,24 @@ private fun VoiceBubble(message: Message, media: MediaInfo) {
                     Size(bar, barHeight), CornerRadius(bar / 2))
             }
         }
-        Text(clock(if (loaded) position else duration), color = ink, style = MaterialTheme.typography.labelMedium)
+        Column(horizontalAlignment = Alignment.End) {
+            Text(clock(if (loaded) position else duration), color = ink, style = MaterialTheme.typography.labelMedium)
+            time?.let { Text(it, Modifier.clearAndSetSemantics { contentDescription = it }, color = ink.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum")) }
+        }
         if (loaded) {
             Text("${VoicePlayer.speed.toString().removeSuffix(".0")}×", Modifier.clip(CircleShape).clickable { VoicePlayer.cycleSpeed() }
                 .background(ink.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp), color = ink, style = MaterialTheme.typography.labelSmall)
         }
     }
+}
+
+/** A card's bubble colour and the text colour on it: the account's fill and white on ours, the grey bubble and the page's text on theirs. */
+@Composable
+private fun cardColors(message: Message): Pair<Color, Color> {
+    val identity = LocalMedia.current?.room?.let { identityOf(it) }
+    return if (message.isOwn) (identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground) to Color.White
+    else Bubbles.incoming to MaterialTheme.colorScheme.onBackground
 }
 
 private const val BARS = 26
@@ -525,22 +633,22 @@ fun clock(ms: Long): String {
 
 // Full screen
 
-/** A photo (pinch to 5×, double tap for 2.5×) or a video (looping; tap to pause, the sound, a scrubber). Back closes. */
+/**
+ * A photo (pinch to 5×, double tap for 2.5×) or a video (iOS's player: `VideoView`). Back closes; `identity` is the
+ * chat's account, for the player's tag.
+ */
 @Composable
-fun MediaViewer(viewer: Viewer, dismiss: () -> Unit) {
+fun MediaViewer(viewer: Viewer, identity: AccountIdentity?, dismiss: () -> Unit) {
     Dialog(dismiss, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            when (viewer) {
-                is Viewer.Photo -> PhotoView(viewer)
-                is Viewer.Video -> VideoView(viewer.file)
-            }
-            // On a dark circle, as iOS 1.3: white alone vanishes over a bright photo.
-            val round = Modifier.statusBarsPadding().padding(12.dp).size(44.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape)
-            IconButton(dismiss, Modifier.align(Alignment.TopStart).then(round)) {
-                Icon(Icons.close, "Close", tint = Color.White)
-            }
-            // As iOS: a photo has Share, a video none.
-            if (viewer is Viewer.Photo) {
+        when (viewer) {
+            is Viewer.Video -> VideoView(viewer, identity, dismiss)
+            is Viewer.Photo -> Box(Modifier.fillMaxSize().background(Color.Black)) {
+                PhotoView(viewer)
+                // On a dark circle, as iOS 1.3: white alone vanishes over a bright photo.
+                val round = Modifier.statusBarsPadding().padding(12.dp).size(44.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape)
+                IconButton(dismiss, Modifier.align(Alignment.TopStart).then(round)) {
+                    Icon(Icons.close, "Close", tint = Color.White)
+                }
                 val context = LocalContext.current
                 IconButton({ share(context, listOf(viewer.file)) }, Modifier.align(Alignment.TopEnd).then(round)) {
                     Icon(Icons.share, "Share", tint = Color.White)
@@ -613,12 +721,20 @@ private fun PhotoView(viewer: Viewer.Photo) {
     image?.let { Image(it, "Photo", zoom, contentScale = ContentScale.Fit) }
 }
 
+
+/**
+ * DESIGN M1 as iOS's `PlayerView`: one video, looping, aspect-fit on black. Close and mute on top under a grabber
+ * (swipe down or up anywhere goes back to the chat; the scrubber's own drag wins), a tap pauses. At the bottom, on a
+ * fade: a share's "@author" and Open in Instagram, its caption (two lines, a tap shows the rest), "Shared by Kivo ·
+ * 9:31 AM" with the account's tag, and the scrubber once the video says how long it is. The sound starts on and isn't
+ * remembered, as on iOS; mute is the player's volume, so the phone's own volume and its keys are left alone.
+ */
 @Composable
-private fun VideoView(file: File) {
+private fun VideoView(viewer: Viewer.Video, identity: AccountIdentity?, dismiss: () -> Unit) {
     val context = LocalContext.current
-    val player = remember(file) {
+    val player = remember(viewer.file) {
         ExoPlayer.Builder(context).setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, true).build().apply {
-            setMediaItem(MediaItem.fromUri(file.toURI().toString()))
+            setMediaItem(MediaItem.fromUri(viewer.file.toURI().toString()))
             repeatMode = Player.REPEAT_MODE_ONE
             prepare()
             playWhenReady = true
@@ -626,6 +742,7 @@ private fun VideoView(file: File) {
     }
     var playing by remember { mutableStateOf(true) }
     var muted by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
     var position by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     DisposableEffect(player) {
@@ -633,6 +750,10 @@ private fun VideoView(file: File) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 playing = isPlaying
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                failed = true
             }
         }
         player.addListener(listener)
@@ -645,25 +766,224 @@ private fun VideoView(file: File) {
         while (true) {
             position = player.currentPosition
             duration = player.duration.coerceAtLeast(0)
-            delay(200)
+            delay(100)
         }
     }
-    Box(Modifier.fillMaxSize().pointerInput(player) { detectTapGestures { if (player.isPlaying) player.pause() else player.play() } }) {
-        ContentFrame(player, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-        if (!playing) Box(Modifier.align(Alignment.Center)) { PlayGlyph() }
-        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
-            .navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            IconButton({ muted = !muted; player.volume = if (muted) 0f else 1f }) {
-                Icon(if (muted) Icons.muted else Icons.sound, if (muted) "Sound on" else "Mute", tint = Color.White)
+    // As iOS: no status bar over a video. The navigation bar stays, for Back.
+    val view = LocalView.current
+    DisposableEffect(view) {
+        (view.parent as? DialogWindowProvider)?.window?.let { window ->
+            WindowCompat.getInsetsController(window, view).apply {
+                systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                hide(WindowInsetsCompat.Type.statusBars())
+                isAppearanceLightNavigationBars = false
             }
-            Slider(
-                if (duration > 0) position.toFloat() / duration else 0f,
-                { player.seekTo((it * duration).toLong()); position = (it * duration).toLong() },
-                Modifier.weight(1f),
-                colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Color.White, inactiveTrackColor = Color.White.copy(alpha = 0.3f)),
-            )
-            Text("${clock(position)} / ${clock(duration)}", Modifier.padding(start = 8.dp), color = Color.White, style = MaterialTheme.typography.labelMedium)
         }
+        onDispose {}
+    }
+    // Swipe down or up past 120 dp to close (a haptic there); short of it, back into place.
+    val density = LocalDensity.current
+    val limit = with(density) { 120.dp.toPx() }
+    var drag by remember { mutableFloatStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    val offset by animateFloatAsState(drag, if (dragging) snap() else spring(), label = "drag")
+    val haptics = LocalHapticFeedback.current
+    val past = abs(drag) > limit
+    LaunchedEffect(past) { if (past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) }
+    val fade = (abs(offset) / with(density) { 500.dp.toPx() }).coerceAtMost(0.6f)
+    Box(
+        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 1 - fade)).pointerInput(Unit) {
+            detectVerticalDragGestures(
+                onDragStart = { dragging = true },
+                onDragEnd = { dragging = false; if (abs(drag) > limit) dismiss() else drag = 0f },
+                onDragCancel = { dragging = false; drag = 0f },
+            ) { change, dy -> change.consume(); drag += dy }
+        },
+    ) {
+        Box(Modifier.fillMaxSize().offset { IntOffset(0, offset.roundToInt()) }) {
+            val toggle = { if (player.isPlaying) player.pause() else player.play() }
+            // Around the frame, not on it: its surface view took the label.
+            Box(Modifier.fillMaxSize().clickable(interactionSource = null, indication = null, role = Role.Button, onClick = toggle)
+                .semantics { contentDescription = if (playing) "Pause" else "Play" }) {
+                ContentFrame(player, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            }
+            if (failed) {
+                PlayerFailure(MediaInfo(viewer.message.content).externalURL, Modifier.align(Alignment.Center)) {
+                    failed = false
+                    player.prepare()
+                    player.play()
+                }
+            } else if (!playing) {
+                Box(Modifier.align(Alignment.Center).size(64.dp).background(Color.Black.copy(alpha = 0.65f), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.play, null, Modifier.size(32.dp), tint = Color.White)
+                }
+            }
+            PlayerOverlay(viewer, identity, failed, muted, position, duration, close = dismiss,
+                mute = { muted = !muted; player.volume = if (muted) 0f else 1f }) { player.seekTo(it); position = it }
+        }
+    }
+}
+
+/** iOS's `mediaGlass` without the glass: black at 65%. */
+private val mediaGlass = Color.Black.copy(alpha = 0.65f)
+
+/** The player's controls and its context (iOS's `PlayerView.overlay`), white on the video. */
+@Composable
+private fun PlayerOverlay(
+    viewer: Viewer.Video, identity: AccountIdentity?, failed: Boolean, muted: Boolean, position: Long, duration: Long,
+    close: () -> Unit, mute: () -> Unit, seek: (Long) -> Unit,
+) {
+    val context = LocalContext.current
+    val info = MediaInfo(viewer.message.content)
+    val caption = ShareCaption.of(viewer.message.content)
+    val link = info.externalURL
+    val text = if (link == null) "" else listOfNotNull(if (caption.author == null) caption.title else null, caption.subtitle, caption.caption).joinToString("\n")
+    var expanded by remember { mutableStateOf(false) }
+    val subheadline = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp)
+    val footnote = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp)
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp)) {
+            Box(Modifier.align(Alignment.TopCenter).size(36.dp, 5.dp).background(Color.White.copy(alpha = 0.55f), CircleShape))
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(close, Modifier.size(48.dp)) {
+                    Box(Modifier.size(44.dp).background(mediaGlass, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(Icons.close, "Close", tint = Color.White)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(mute, Modifier.size(48.dp)) {
+                    Box(Modifier.size(44.dp).background(mediaGlass, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(if (muted) Icons.muted else Icons.sound, if (muted) "Unmute" else "Mute", Modifier.size(22.dp), tint = Color.White)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        Column(
+            Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                .padding(start = 16.dp, end = 16.dp, top = 60.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (link != null && !failed) { // a failure offers its own way out, in the middle
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(caption.author?.let { "@$it" }.orEmpty(), Modifier.weight(1f), color = Color.White, style = subheadline,
+                        fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(Modifier.padding(start = 10.dp).clip(CircleShape).background(mediaGlass).clickable { openInstagram(context, link) }
+                        .heightIn(min = 30.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Open in Instagram", color = Color.White, style = footnote, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.openOutside, null, Modifier.padding(start = 4.dp).size(14.dp), tint = Color.White)
+                    }
+                }
+            }
+            if (text.isNotEmpty() && !failed) {
+                // The caption gives way when the rest needs the room (landscape at a large font size): measured last.
+                val toggle = Modifier.weight(1f, fill = false).fillMaxWidth().clickable(interactionSource = null, indication = null) { expanded = !expanded }
+                if (expanded) {
+                    Text(text, toggle.heightIn(max = 160.dp).verticalScroll(rememberScrollState()), color = Color.White, style = subheadline)
+                } else {
+                    Text(text, toggle, color = Color.White, style = subheadline, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            // One line for TalkBack: "Shared by Kivo · 9:31 AM, Studio account".
+            Row(Modifier.semantics(mergeDescendants = true) {}, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Shared by ${viewer.sender} · ${sharedTime(context, viewer.message.ts)}", Modifier.weight(1f, fill = false),
+                    color = Color.White.copy(alpha = 0.75f), style = footnote)
+                identity?.let { AccountTag(it) }
+            }
+            // Nothing to scrub until the video says how long it is (none on a failure).
+            if (duration > 0) Scrubber(position, duration, seek)
+        }
+    }
+}
+
+/** iOS's `timeText`: "9:31 AM" today, else "Oct 12, 9:31 AM", in the phone's 12 or 24 hours. */
+private fun sharedTime(context: Context, ts: Long): String =
+    DateUtils.formatDateTime(context, ts, DateUtils.FORMAT_SHOW_TIME or
+        (if (DateUtils.isToday(ts)) 0 else DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH))
+
+private fun openInstagram(context: Context, url: String) {
+    context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+}
+
+/**
+ * Elapsed and remaining under a 3 dp track that thickens to 8 while dragged (DESIGN M1); a touch seeks at once. TalkBack:
+ * "Position, 0:12 of 0:42", 5 s a step.
+ */
+@Composable
+private fun Scrubber(position: Long, duration: Long, seek: (Long) -> Unit) {
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val shown = dragging?.let { (it * duration).toLong() } ?: position
+    val fraction = (shown.toFloat() / duration).coerceIn(0f, 1f)
+    val thickness by animateDpAsState(if (dragging == null) 3.dp else 8.dp, tween(150), label = "track")
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val seconds = duration / 1000f
+    Column(
+        Modifier.clearAndSetSemantics {
+            contentDescription = "Position"
+            stateDescription = "${clock(position)} of ${clock(duration)}"
+            progressBarRangeInfo = ProgressBarRangeInfo(position / 1000f, 0f..seconds, steps = ((seconds / 5).toInt() - 1).coerceAtLeast(0))
+            setProgress { seek((it.coerceIn(0f, seconds) * 1000).toLong()); true }
+        },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Canvas(
+            Modifier.fillMaxWidth().height(24.dp).pointerInput(duration, rtl) {
+                awaitEachGesture {
+                    fun at(x: Float) {
+                        val f = (x / size.width).coerceIn(0f, 1f).let { if (rtl) 1 - it else it }
+                        dragging = f
+                        seek((f * duration).toLong())
+                    }
+                    val down = awaitFirstDown()
+                    down.consume()
+                    at(down.position.x)
+                    drag(down.id) { at(it.position.x); it.consume() }
+                    dragging = null
+                }
+            },
+        ) {
+            val h = thickness.toPx()
+            val y = (size.height - h) / 2
+            val filled = size.width * fraction
+            drawRoundRect(Color.White.copy(alpha = 0.3f), Offset(0f, y), Size(size.width, h), CornerRadius(h / 2))
+            drawRoundRect(Color.White, Offset(if (rtl) size.width - filled else 0f, y), Size(filled, h), CornerRadius(h / 2))
+        }
+        Row {
+            val style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = "tnum")
+            Text(clock(shown), color = Color.White.copy(alpha = 0.75f), style = style)
+            Spacer(Modifier.weight(1f))
+            // Behind an LTR mark, so a right-to-left language doesn't put the minus after the time.
+            Text("\u200E−" + clock(duration - shown), color = Color.White.copy(alpha = 0.75f), style = style)
+        }
+    }
+}
+
+/**
+ * DESIGN M1's failed state: what happened, then Try Again and, for a share, the way out to Instagram. The file is
+ * already here, so the cause is playback on this phone, not the share.
+ */
+@Composable
+private fun PlayerFailure(link: String?, modifier: Modifier, retry: () -> Unit) {
+    val context = LocalContext.current
+    Column(modifier.padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Couldn't play this video", color = Color.White, style = MaterialTheme.typography.titleMedium.copy(fontSize = 17.sp), fontWeight = FontWeight.SemiBold)
+        Text("It downloaded, but this phone couldn't play it.", color = Color.White.copy(alpha = 0.75f),
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp), textAlign = TextAlign.Center)
+        Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassCapsule(Icons.retry, "Try Again", retry)
+            link?.let { GlassCapsule(Icons.openOutside, "Open in Instagram") { openInstagram(context, it) } }
+        }
+    }
+}
+
+@Composable
+private fun GlassCapsule(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, action: () -> Unit) {
+    Row(Modifier.clip(CircleShape).background(mediaGlass).clickable(onClick = action).heightIn(min = 44.dp).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, Modifier.size(18.dp), tint = Color.White)
+        Text(label, Modifier.padding(start = 6.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+            fontWeight = FontWeight.SemiBold)
     }
 }

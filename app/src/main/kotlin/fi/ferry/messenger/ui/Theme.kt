@@ -59,8 +59,32 @@ fun FerryTheme(content: @Composable () -> Unit) {
 /** Status glyphs and text (always with a glyph, never colour alone): 5+ on white and on #1C1C1E. */
 object Status {
     val warn: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFFFF9F0A) else Color(0xFFB25000)
-    val ok: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF30D158) else Color(0xFF1E7B34)
-    val error: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFFFF453A) else Color(0xFFC4251C)
+    val ok: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF30D158) else Color(0xFF1F7A35)
+    val error: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFFFF453A) else Color(0xFFD70015)
+}
+
+/**
+ * DESIGN §8.1's grouped pages (O5, A1, A2: iOS's inset-grouped `Form`): the page, and the cards on it
+ * (`systemGroupedBackground`, `secondarySystemGroupedBackground`).
+ */
+object Grouped {
+    val page: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color.Black else Color(0xFFF2F2F7)
+    val card: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF1C1C1E) else Color.White
+}
+
+/**
+ * Brand: scenery only (DESIGN §8.1 "Brand: the sea", principle 10): O1's sea, as iOS's `Scenery`. Never a tint, a
+ * control, text or chrome: colour in the UI means account. The icon and the launch screen carry it in their own files.
+ */
+object Scenery {
+    /** The sea band's top, at the horizon. */
+    val seaHorizon: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF0F4561) else Color(0xFF1A7893)
+    /** The sea band's lower edge. */
+    val seaFloor: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF05192A) else Color(0xFF0D3F5B)
+    /** The 40 dp above the horizon, fading in from the sky (the screen's background). */
+    val seaHaze: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF0B1C27) else Color(0xFFE4F0F3)
+    /** Swell and wake, at 35–70% opacity. */
+    val foam = Color(0xFF9ED6E2)
 }
 
 /** The account's colour as a fill (the same in both modes, white text on it). */

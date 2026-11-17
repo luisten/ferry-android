@@ -1,4 +1,4 @@
-Copied unchanged from github.com/luisten/ferry-messenger `FerryTests/Fixtures/` at a2a0c44 (the engine this repo pins).
+Copied unchanged from github.com/luisten/ferry-messenger `FerryTests/Fixtures/` at 70aa388 (the engine this repo pins).
 
 - `engine_*.json`: what the engine (`core/chat`) makes of Instagram's captures, written there by `go test ./chat -update`.
   When the pin moves and the engine's output changed, copy them again from the new commit.

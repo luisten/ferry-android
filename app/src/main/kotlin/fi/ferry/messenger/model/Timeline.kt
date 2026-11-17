@@ -2,6 +2,10 @@ package fi.ferry.messenger.model
 
 import kotlinx.serialization.json.JsonElement
 import java.net.URI
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 // The thread (the iOS app's Timeline.swift): what each message shows as, and the pure fold from a chat's raw window
 // to its rows. Only what the engine sends: no bridge send statuses, no `xma_fetch_status` failures.
@@ -80,6 +84,8 @@ sealed interface MessageKind {
 
     companion object {
         const val EVENT_KEY = "fi.ferry.event"
+        /** `core/chat`'s reaction log entry (`isReactionLog`). */
+        const val REACTION_LOG_KEY = "fi.ferry.reactionLog"
         const val UNSUPPORTED_KEY = "fi.ferry.unsupported"
         /** The text sent with a share: a story reply, or a story reaction's emoji. */
         const val SHARE_TEXT_KEY = "fi.ferry.share_text"
@@ -407,7 +413,9 @@ object Timeline {
             }
         }
 
-        val messages = bases.mapTo(mutableListOf()) { base ->
+        // Instagram's "Reacted ❤️ to your message" entry is no row (the reaction is on the message); only the inbox
+        // reads it, as the chat's newest message.
+        val messages = bases.filter { it.content[MessageKind.REACTION_LOG_KEY] == null }.mapTo(mutableListOf()) { base ->
             val id = base.eventID.orEmpty()
             val sender = base.sender.orEmpty()
             if (isRedacted(base)) {
@@ -476,12 +484,14 @@ object Timeline {
     }
 
     /**
-     * A live update's messages worth a notification (A8): from someone else, not an edit, newer than `since` (the
+     * A live update's messages worth a notification (A8): from someone else, not an edit, not a reaction log entry
+     * (the user's call: reactions don't notify on Android; they still make the chat unread), newer than `since` (the
      * process's start: older ones were there at launch or came with history).
      */
     fun notifiable(events: List<Event>, me: String, since: Long): List<Event> = events.filter { e ->
         (e.type == "m.room.message" || e.type == "m.sticker") && e.sender != me && e.eventID != null &&
-            e.content["m.relates_to"]["rel_type"].string != "m.replace" && (e.originServerTS ?: 0) > since
+            e.content["m.relates_to"]["rel_type"].string != "m.replace" && e.content[MessageKind.REACTION_LOG_KEY] == null &&
+            (e.originServerTS ?: 0) > since
     }
 
     /**
@@ -524,10 +534,10 @@ object Timeline {
     data class Row(
         val message: Message,
         val position: GroupPosition,
-        /** dp above the row: 2 inside a group, 10 between groups, 16 when a time label or the unread line shows. */
+        /** dp above the row: 2 inside a group, 10 between groups, 16 under a day chip. */
         val spacing: Int,
-        /** A time label above the row: the first row, and after a gap of more than an hour. */
-        val showsTime: Boolean,
+        /** A day chip above the row ("Today", `dayLabel`): the first row, and the first of each day. */
+        val startsDay: Boolean,
         /** Groups only, on someone else's message; null in DMs and on ours. */
         val groupSender: GroupSender?,
         /** The "New messages" line goes above this row. */
@@ -543,13 +553,15 @@ object Timeline {
      * `unreadAfter`: how far we'd read when the chat opened (our receipt's ms), null when it opened read. The "New
      * messages" line goes above the first message from someone else after it and after our own last message.
      */
-    fun layout(messages: List<Message>, isGroup: Boolean = false, unreadAfter: Long? = null): List<Row> {
+    fun layout(messages: List<Message>, isGroup: Boolean = false, unreadAfter: Long? = null, zone: ZoneId = ZoneId.systemDefault()): List<Row> {
         val firstUnread = unreadAfter?.let { after ->
             val from = maxOf(after, messages.lastOrNull { it.isOwn }?.ts ?: Long.MIN_VALUE)
             messages.indexOfFirst { !it.isOwn && it.ts > from }.takeIf { it >= 0 }
         }
+        fun day(ts: Long) = Instant.ofEpochMilli(ts).atZone(zone).toLocalDate()
+        fun startsDay(i: Int) = i == 0 || day(messages[i].ts) != day(messages[i - 1].ts)
         fun joins(i: Int): Boolean {
-            if (i <= 0 || i >= messages.size || i == firstUnread) return false // the line starts a new run
+            if (i <= 0 || i >= messages.size || i == firstUnread || startsDay(i)) return false // the line and a day chip start a new run
             val a = messages[i - 1]
             val b = messages[i]
             return a.sender == b.sender && b.ts - a.ts < 180_000 && listOf(a, b).all { it.kind != MessageKind.Unsent && !it.kind.isChatEvent }
@@ -562,14 +574,65 @@ object Timeline {
                 joins(i + 1) -> GroupPosition.MIDDLE
                 else -> GroupPosition.LAST
             }
-            val showsTime = i == 0 || messages[i].ts - messages[i - 1].ts > 3_600_000
-            val spacing = if (i == 0) 0 else if (joined) 2 else if (showsTime || i == firstUnread) 16 else 10
+            val startsDay = startsDay(i)
+            val spacing = if (i == 0) 0 else if (joined) 2 else if (startsDay || i == firstUnread) 16 else 10
             val labelled = messages[i].kind != MessageKind.Unsent
             val first = position == GroupPosition.SINGLE || position == GroupPosition.FIRST
             val last = position == GroupPosition.SINGLE || position == GroupPosition.LAST
             val sender = if (isGroup && !messages[i].isOwn && !messages[i].kind.isChatEvent) GroupSender(labelled && first, labelled && last) else null
-            Row(messages[i], position, spacing, showsTime, sender, i == firstUnread)
+            Row(messages[i], position, spacing, startsDay, sender, i == firstUnread)
         }
+    }
+
+    /**
+     * The words the UI formats a day chip with (`DateFormat.getBestDateTimePattern` of "EEEE", "EEEdMMM" and
+     * "EEEdMMMy" in the user's locale), as `Inbox.TimeFormats` is for the inbox: the defaults are for the tests.
+     */
+    data class DayFormats(
+        val weekday: String = "EEEE",
+        val date: String = "EEE d MMM",
+        val dateWithYear: String = "EEE d MMM y",
+        val locale: Locale = Locale.ROOT,
+    )
+
+    /**
+     * A day chip's words (WhatsApp's): "Today", "Yesterday", the weekday within a week, then "Mon 3 Nov", with the
+     * year when it isn't this one.
+     */
+    fun dayLabel(ts: Long, now: Long, zone: ZoneId, formats: DayFormats = DayFormats()): String {
+        val date = Instant.ofEpochMilli(ts).atZone(zone)
+        val day = date.toLocalDate()
+        val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        val pattern = when {
+            day == today -> return "Today"
+            day == today.minusDays(1) -> return "Yesterday"
+            !day.isBefore(today.minusDays(6)) && ts <= now -> formats.weekday
+            day.year == today.year -> formats.date
+            else -> formats.dateWithYear
+        }
+        return date.format(DateTimeFormatter.ofPattern(pattern, formats.locale))
+    }
+
+    /**
+     * TalkBack's words for a bubble: the sender where a run starts (and the account at the top of a day, "From you, as
+     * Tamo"); inside a run it's just the text (DESIGN §11: less noise). In a group every incoming bubble names its
+     * sender instead ("From Theo Park, …"). The iOS app's `MessageRow.spoken` and `SpokenSender`.
+     */
+    fun spokenLabel(row: Row, text: String, clock: String, ownName: String?, senderName: String): String {
+        val who = spokenSender(row, ownName, senderName) ?: return "$text, $clock"
+        return if (row.groupSender != null) "$who, $text, $clock" else "$who: $text, $clock"
+    }
+
+    /**
+     * `spokenLabel`'s sender alone ("From Kivo", "You"), null where it names none: for a card, which says what it is
+     * and its time itself (Android's: TalkBack joins the bubble's words and the card's, "From Kivo, Photo, 9:41").
+     */
+    fun spokenSender(row: Row, ownName: String?, senderName: String): String? {
+        val message = row.message
+        if (row.groupSender != null) return if (message.kind != MessageKind.Unsent) "From $senderName" else null
+        if (row.position != GroupPosition.SINGLE && row.position != GroupPosition.FIRST) return null
+        return if (message.isOwn) (if (row.startsDay) "From you, as ${ownName ?: "you"}" else "You")
+        else if (row.startsDay) "From $senderName" else senderName
     }
 
     private fun group(reactions: Collection<Event>, position: Map<String, Int>, me: String): List<Message.Reaction> {

@@ -3,8 +3,10 @@ package fi.ferry.messenger.ui
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentResolver
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,8 +16,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.content.MediaType
+import androidx.compose.foundation.content.consume
+import androidx.compose.foundation.content.contentReceiver
+import androidx.compose.foundation.content.hasMediaType
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,13 +37,18 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,6 +63,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,15 +83,18 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -93,6 +109,7 @@ import fi.ferry.messenger.model.MediaInfo
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessageKind
 import fi.ferry.messenger.model.RecentReactions
+import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.get
 import fi.ferry.messenger.model.string
@@ -116,26 +133,40 @@ class MessageActions(
 
 /**
  * A long press opens the message's menu: the reaction row, Reply, Copy, Edit, Unsend (or Delete for a failed send).
- * A double tap hearts it, like Instagram; a tap on a failed send retries it.
+ * A double tap hearts it, like Instagram; a tap on a failed send retries it. `label`: TalkBack's words for the bubble
+ * (decision A18), `extraActions` its other actions ("Open lowtide.band").
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageMenu(message: Message, actions: MessageActions, content: @Composable () -> Unit) {
+fun MessageMenu(
+    message: Message, actions: MessageActions, label: String? = null, extraActions: List<CustomAccessibilityAction> = emptyList(),
+    content: @Composable () -> Unit,
+) {
     var open by remember { mutableStateOf(false) }
     val tap = remember { TapTarget() }
-    SideEffect { tap.hold = { if (message.kind != MessageKind.Unsent) open = true } }
     var confirmUnsend by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val canSend = !actions.readOnly && message.eventID != null
     val mine = message.reactions.firstOrNull { it.myEventID != null }?.key
     val copyable = message.shareText ?: message.body.takeIf { message.kind.media == null && it.isNotEmpty() }
     val failed = message.status is Message.Status.Failed
+    val click = { if (failed) actions.retry(message) else tap.action?.invoke() }
+    val heart = if (canSend && message.kind.media == null && (mine == null || !Message.Reaction.same(mine, "❤️"))) ({ actions.react("❤️", message) }) else null
+    SideEffect {
+        tap.hold = { if (message.kind != MessageKind.Unsent) open = true }
+        tap.click = { click() }
+        tap.heart = heart
+    }
     Box(
         Modifier.combinedClickable(
-            onClick = { if (failed) actions.retry(message) else tap.action?.invoke() },
-            onDoubleClick = if (canSend && message.kind.media == null && (mine == null || !Message.Reaction.same(mine, "❤️"))) ({ actions.react("❤️", message) }) else null,
+            onClick = { click() },
+            onDoubleClick = heart,
             onLongClick = { if (message.kind != MessageKind.Unsent) open = true },
-        ).semantics { if (message.kind != MessageKind.Unsent) onLongClick("React or reply") { open = true; true } },
+        ).semantics {
+            label?.let { contentDescription = it }
+            if (extraActions.isNotEmpty()) customActions = extraActions
+            if (message.kind != MessageKind.Unsent) onLongClick("React or reply") { open = true; true }
+        },
     ) {
         CompositionLocalProvider(LocalTap provides tap) { content() }
     }
@@ -286,29 +317,36 @@ sealed interface ComposerMode {
 }
 
 /**
- * DESIGN §6.9: the account's avatar (the chat is locked to it), the field ("Message as Studio"), and once there's text a
- * send button in the account's colour. A counter from 900 characters; past 1000 (Instagram's limit) Send is off.
+ * What "+" offers: the photo picker, and on a phone with a camera the camera app's photo and video (D4). `paste`: photos
+ * and videos pasted into the field, or a keyboard's (D5).
+ */
+class AttachActions(val library: () -> Unit, val takePhoto: (() -> Unit)?, val recordVideo: (() -> Unit)?, val paste: (List<Uri>) -> Unit)
+
+/**
+ * DESIGN §6.9: the account's avatar (the chat is locked to it), the field ("Message as Studio"), and once there's text or
+ * a photo a send button in the account's colour. A counter from 900 characters; past 1000 (Instagram's limit) Send is
+ * off, and while a photo or video is still being prepared.
  */
 @Composable
 fun Composer(
-    draft: TextFieldValue,
-    change: (TextFieldValue) -> Unit,
+    draft: TextFieldState,
     identity: AccountIdentity?,
     login: BridgeAPI.Login?,
     mode: ComposerMode?,
     cancel: () -> Unit,
     send: () -> Unit,
     focus: FocusRequester,
-    attachment: AttachmentState? = null,
-    /** The photo picker; null where there are no attachments (editing, a request, a reply that accepts one). */
-    attach: (() -> Unit)? = null,
-    removeAttachment: () -> Unit = {},
+    /** Photos and videos waiting above the field, in the order they go. */
+    items: List<ComposerItem> = emptyList(),
+    /** "+"; null where there are no attachments (editing, a request, a reply that accepts one). */
+    attach: AttachActions? = null,
+    removeAttachment: (Long) -> Unit = {},
     /** A recorded voice note to send; null where there are none (as for attachments). */
     sendVoice: ((Attachment) -> Unit)? = null,
 ) {
     val account = identity?.name ?: login?.displayName ?: "this account"
     val count = draft.text.trim().length
-    val ready = attachment is AttachmentState.Ready
+    val context = LocalContext.current
     val fill = identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground
     Column(Modifier.fillMaxWidth().navigationBarsPadding().imePadding().padding(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -318,14 +356,12 @@ fun Composer(
             ComposerMode.AcceptsRequest -> ModeBar(Icons.check, "Replying accepts the request.", null, cancel)
             null -> {}
         }
-        attachment?.let { AttachmentBar(it, removeAttachment) }
+        if (items.size == 1) AttachmentBar(items[0], typed = count > 0) { removeAttachment(items[0].id) }
+        else if (items.size > 1) SetBar(items, typed = count > 0, removeAttachment)
         val recording = (VoiceRecorder.recording || VoiceRecorder.review != null) && sendVoice != null
         // As iOS: "+" in its own circle left of the field.
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (!recording) attach?.let {
-            Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable(onClickLabel = "Photo or video", onClick = it),
-                contentAlignment = Alignment.Center) { Icon(Icons.add, "Photo or video", tint = MaterialTheme.colorScheme.onBackground) }
-        }
+        if (!recording) attach?.let { PlusButton(it, enabled = items.size < MAX_ATTACHMENTS) }
         Row(
             Modifier.weight(1f).heightIn(min = 44.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(22.dp))
                 .padding(start = 8.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
@@ -340,12 +376,21 @@ fun Composer(
                 VoiceRecorder.review?.let { ReviewPlayer(it) } ?: RecordingStrip(sendVoice!!)
             } else Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
                 BasicTextField(
-                    draft, change, Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = "Message, sending as $account" },
+                    draft,
+                    // Always on, so the keyboard is always told the field takes images: added only with "+", it stayed off
+                    // after an Edit (the keyboard reads it when its session starts, R2-F4). Where "+" isn't, a paste says why.
+                    Modifier.fillMaxWidth().focusRequester(focus).pastes(context, attach?.paste ?: { _ ->
+                        AppModel.actionError = if (mode == ComposerMode.Editing) "An edit can only change the text." else "Only text can be sent here."
+                    })
+                        .semantics { contentDescription = "Message, sending as $account" },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onBackground),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground), maxLines = 6,
-                    decorationBox = { field ->
-                        if (draft.text.isEmpty()) Text("Message as $account", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        field()
+                    lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 6),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onBackground),
+                    decorator = { field ->
+                        Box {
+                            if (draft.text.isEmpty()) Text("Message as $account", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            field()
+                        }
                     },
                 )
                 if (count >= 900) {
@@ -354,10 +399,10 @@ fun Composer(
                         style = MaterialTheme.typography.labelSmall, color = if (over) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (count == 0 && attachment == null && sendVoice != null) {
-                MicButton(sendVoice)
-            } else if (count > 0 || ready) {
-                val enabled = count <= Timeline.MAX_TEXT_LENGTH && attachment !is AttachmentState.Preparing
+            if (count == 0 && items.isEmpty() && sendVoice != null) {
+                MicButton(fill, sendVoice)
+            } else if (count > 0 || items.isNotEmpty()) {
+                val enabled = count <= Timeline.MAX_TEXT_LENGTH && (mode == ComposerMode.Editing || items.all { it.ready != null })
                 IconButton(send, Modifier.size(40.dp), enabled = enabled) {
                     Box(Modifier.size(32.dp).background(fill.copy(alpha = if (enabled) 1f else 0.4f), CircleShape), contentAlignment = Alignment.Center) {
                         Icon(if (mode == ComposerMode.Editing) Icons.check else Icons.send, if (mode == ComposerMode.Editing) "Save edit" else "Send",
@@ -375,7 +420,7 @@ fun Composer(
  * note is a second long. The first press asks for the microphone.
  */
 @Composable
-private fun MicButton(send: (Attachment) -> Unit) {
+private fun MicButton(fill: Color, send: (Attachment) -> Unit) {
     val context = LocalContext.current
     val sending = VoiceRecorder.recording || VoiceRecorder.review != null
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -411,9 +456,14 @@ private fun MicButton(send: (Attachment) -> Unit) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (sending) {
-            Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.onBackground, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.send, "Send voice message", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.background)
+        if (VoiceRecorder.recording && !VoiceRecorder.handsFree) {
+            // Held: the mic on the account's colour (iOS's `mic.fill` on a disc).
+            Box(Modifier.size(40.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.mic, null, Modifier.size(24.dp), tint = Color.White)
+            }
+        } else if (sending) {
+            Box(Modifier.size(32.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.send, "Send voice message", Modifier.size(20.dp), tint = Color.White)
             }
         } else {
             Icon(Icons.mic, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onBackground)
@@ -500,34 +550,130 @@ private fun ReviewPlayer(note: Attachment) {
     }
 }
 
-/** A pick on its way into the composer: being prepared (`Outgoing`), or ready to send. */
-sealed interface AttachmentState {
-    data class Preparing(val what: String) : AttachmentState
-    data class Ready(val attachment: Attachment) : AttachmentState
+/**
+ * Photos and videos pasted (the field's Paste) or inserted by a keyboard (its clipboard, GIFs, stickers) go to `paste`
+ * (D5); text and anything else goes on into the field. Another app's URIs: content ones only, never a file path, and a
+ * photo or video by their provider's own type.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.pastes(context: Context, paste: (List<Uri>) -> Unit) = contentReceiver { content ->
+    if (!content.hasMediaType(MediaType.Image) && !content.hasMediaType(VIDEO)) return@contentReceiver content
+    val uris = mutableListOf<Uri>()
+    val rest = content.consume { item -> item.uri?.takeIf { isPhotoOrVideo(context, it) }?.also { uris += it } != null }
+    if (uris.isNotEmpty()) paste(uris)
+    rest
 }
 
-/** DESIGN §6.9's attachment bar: the pick, what it is, that a caption goes on its own (Instagram drops them), and ✕. */
+private val VIDEO = MediaType("video/*")
+
+private fun isPhotoOrVideo(context: Context, uri: Uri): Boolean {
+    if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+    val type = runCatching { context.contentResolver.getType(uri) }.getOrNull() ?: return false
+    return type.startsWith("image/") || type.startsWith("video/")
+}
+
+/** iOS's `maxAttachments`: the photos and videos one Send takes. */
+const val MAX_ATTACHMENTS = 10
+
+/** A photo or video waiting above the field (iOS's `ComposerItem`): being prepared (`Outgoing`) until it's `ready`. */
+data class ComposerItem(val id: Long, val video: Boolean, val ready: Attachment? = null)
+
+/**
+ * "+" in its own circle (as iOS), off at 10 waiting. With a camera, a menu in iOS's order (A21): Take Photo, Record
+ * Video (Android has no one intent for both), Choose from Library; without one, the photo picker at once.
+ */
 @Composable
-private fun AttachmentBar(state: AttachmentState, remove: () -> Unit) {
-    val ready = (state as? AttachmentState.Ready)?.attachment
+private fun PlusButton(attach: AttachActions, enabled: Boolean) {
+    var open by remember { mutableStateOf(false) }
+    val menu = attach.takePhoto != null || attach.recordVideo != null
+    val ink = MaterialTheme.colorScheme.onBackground
+    Box {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(enabled = enabled, onClickLabel = "Add photos or videos") { if (menu) open = true else attach.library() },
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.add, "Add photos or videos", tint = if (enabled) ink else ink.copy(alpha = 0.38f))
+        }
+        DropdownMenu(open, { open = false }) {
+            attach.takePhoto?.let { take ->
+                DropdownMenuItem({ Text("Take Photo") }, { open = false; take() }, leadingIcon = { Icon(Icons.camera, null) })
+            }
+            attach.recordVideo?.let { record ->
+                DropdownMenuItem({ Text("Record Video") }, { open = false; record() }, leadingIcon = { Icon(Icons.video, null) })
+            }
+            DropdownMenuItem({ Text("Choose from Library") }, { open = false; attach.library() }, leadingIcon = { Icon(Icons.photo, null) })
+        }
+    }
+}
+
+/** DESIGN §6.9's attachment bar: the pick, what it is, that typed text goes on its own (Instagram drops captions), and ✕. */
+@Composable
+private fun AttachmentBar(item: ComposerItem, typed: Boolean, remove: () -> Unit) {
+    val ready = item.ready
     val title = when {
-        ready == null -> "Preparing ${(state as AttachmentState.Preparing).what}…"
+        ready == null -> if (item.video) "Preparing video…" else "Preparing photo…"
         ready.kind == Attachment.Kind.VIDEO -> "Video" + (ready.duration?.let { " · ${clock(it)}" } ?: "")
         ready.kind == Attachment.Kind.GIF -> "GIF"
         else -> "Photo"
     }
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).padding(start = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.padding(vertical = 8.dp).size(44.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.background),
-            contentAlignment = Alignment.Center) {
-            ready?.preview?.let { Image(it, null, Modifier.size(44.dp), contentScale = ContentScale.Crop) }
-                ?: CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        }
+        Thumbnail(item, 44.dp, Modifier.padding(vertical = 8.dp))
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
-            Text("Your text is sent as a separate message.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (ready != null && typed) {
+                Text("Your text is sent as a separate message.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-        IconButton(remove) { Icon(Icons.close, "Remove") }
+        IconButton(remove) { Icon(Icons.close, if (item.video) "Remove video" else "Remove photo") }
+    }
+}
+
+/** iOS 1.7's set: two or more waiting, each with its ✕. They go one after another, in this order, then the text. */
+@Composable
+private fun SetBar(items: List<ComposerItem>, typed: Boolean, remove: (Long) -> Unit) {
+    val videos = items.count { it.video }
+    val photos = items.size - videos
+    val title = listOfNotNull(
+        "$photos photo${if (photos == 1) "" else "s"}".takeIf { photos > 0 },
+        "$videos video${if (videos == 1) "" else "s"}".takeIf { videos > 0 },
+    ).joinToString(", ")
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp))
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column {
+            Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(if (typed && items.all { it.ready != null }) "Each is sent on its own, then your text." else "Each is sent on its own, in this order.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items.forEachIndexed { i, item ->
+                key(item.id) {
+                    Box {
+                        Thumbnail(item, 56.dp)
+                        Box(Modifier.align(Alignment.TopEnd).size(28.dp).clickable(role = Role.Button) { remove(item.id) }
+                            .semantics { contentDescription = "Remove ${if (item.video) "video" else "photo"} ${i + 1}" },
+                            contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(20.dp).background(Color.Black.copy(alpha = 0.6f), CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(Icons.close, null, Modifier.size(14.dp), tint = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The pick's picture (a video's with ▶), or a spinner while it's prepared. */
+@Composable
+private fun Thumbnail(item: ComposerItem, size: Dp, modifier: Modifier = Modifier) {
+    Box(modifier.size(size).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.Center) {
+        val preview = item.ready?.preview
+        if (preview != null) {
+            Image(preview, null, Modifier.size(size), contentScale = ContentScale.Crop)
+            if (item.video) Icon(Icons.play, null, Modifier.size(16.dp), tint = Color.White)
+        } else if (item.ready == null) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
     }
 }
 
@@ -566,6 +712,20 @@ fun RequestBar(requester: String, identity: AccountIdentity?, accept: () -> Unit
     }
 }
 
+/** "Delete request from X?", in the thread's request bar and in the Requests list: the same words, then `confirm`. */
+@Composable
+fun DeleteRequestDialog(room: Room, dismiss: () -> Unit, confirm: () -> Unit) {
+    val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text("Delete request from ${room.name}?") },
+        // ponytail: iOS's copy; whether Instagram shows the requester a "Seen" is untested, so it keeps the warning.
+        text = { Text("It's deleted from ${login?.profile?.username?.let { "@$it's" } ?: "your"} Instagram inbox too. They may see it as read.") },
+        confirmButton = { TextButton({ dismiss(); confirm() }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(dismiss) { Text("Cancel") } },
+    )
+}
+
 @Composable
 private fun ModeBar(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, detail: String?, cancel: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(16.dp)).padding(start = 12.dp),
@@ -599,6 +759,9 @@ fun Notice(text: String, error: Boolean, dismiss: () -> Unit) {
 /** A failed send says so under the bubble; a tap on it (or the bubble) sends it again. */
 @Composable
 fun NotSent(retry: () -> Unit) {
-    Text("Not sent. Tap to retry.", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = retry).padding(horizontal = 6.dp, vertical = 2.dp),
-        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+    Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = retry).padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(Icons.failed, null, Modifier.size(14.dp), tint = Status.error)
+        Text("Not sent. Tap to retry.", style = MaterialTheme.typography.labelMedium, color = Status.error)
+    }
 }

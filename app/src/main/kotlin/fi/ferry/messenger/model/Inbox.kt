@@ -35,6 +35,8 @@ object Inbox {
     const val ARCHIVED_TAG = "u.archived"
     /** When the chat was archived (ms), inside the tag. */
     const val ARCHIVED_AT_KEY = "com.igmessenger.archived_at"
+    /** The tag that marks a chat unread: this device only, like Archive (Instagram's web API has no request for it). */
+    const val MARKED_UNREAD_TAG = "u.unread"
 
     /**
      * The tag for archiving `room` now. Never earlier than its last message: a phone clock behind Instagram's would

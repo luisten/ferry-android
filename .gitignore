@@ -6,6 +6,11 @@ build/
 *.iml
 local.properties
 
+# Signing keys and their details never go in the repo (the release key is in the developer's ~/.gradle/gradle.properties)
+*.jks
+*.keystore
+keystore.properties
+
 # A local checkout of the engine while its JNI bridge changes (CLAUDE.md): never committed
 go.work
 go.work.sum

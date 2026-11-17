@@ -6,12 +6,14 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.setValue
 import fi.ferry.core.IGCore
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.BridgeAPI
+import fi.ferry.messenger.model.Event
 import fi.ferry.messenger.model.IG
 import fi.ferry.messenger.model.IGAdapter
 import fi.ferry.messenger.model.Inbox
@@ -31,6 +33,7 @@ import kotlin.concurrent.thread
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -56,7 +59,7 @@ object AppModel {
     var initialSyncDone by mutableStateOf(false); private set
     /** A new login is with the engine. */
     var connecting by mutableStateOf(false); private set
-    /** Why the last new login failed, in Instagram's or the engine's words. */
+    /** Why the last login failed, in Instagram's or the engine's words. */
     var loginError by mutableStateOf<String?>(null); private set
     /** A notification's chat to open (MainActivity's intent). */
     var openRoom by mutableStateOf<String?>(null)
@@ -65,6 +68,8 @@ object AppModel {
     var visibleRoom: String? = null
     /** A new account just connected: it's named next (O5, DESIGN §3.1). */
     var naming by mutableStateOf<String?>(null)
+    /** A new account just logged in: O4 shows it connecting, before O5 names it. */
+    var justConnected by mutableStateOf<String?>(null)
     /** Failed reconnects while no account is connected: two make the "Can't reach Instagram" banner. */
     var syncFailures by mutableStateOf(0); private set
     /** The banner "Later" put away; it comes back at the next launch, or when it changes. */
@@ -86,8 +91,16 @@ object AppModel {
     const val ME = IGAdapter.ME
 
     private val roomsState = mutableStateOf(mutableMapOf<String, Room>(), neverEqualPolicy())
-    /** The chats by room ID. A change inside a room notifies too (the map is re-sent after each batch of updates). */
+    /**
+     * The chats by room ID. A change inside a room notifies too: the map is re-sent after each batch of updates, and
+     * each room's own `Room.Version` is snapshot state, so a composable handed the same Room (an inbox row, the
+     * thread's header, Chat Info), which Compose would skip, is recomposed when that room changes.
+     */
     val rooms: Map<String, Room> get() = roomsState.value
+
+    init {
+        Room.Version.make = { object : Room.Version() { override var count by mutableIntStateOf(0) } }
+    }
 
     /** Accounts in the user's order (scope bar, stack). */
     val orderedAccounts: List<BridgeAPI.Login>
@@ -119,12 +132,19 @@ object AppModel {
      * (`Inbox.folder`), so a new message still brings the chat back.
      */
     private var archived = mapOf<String, Long>()
+    /** Chats marked unread on this phone (`Inbox.MARKED_UNREAD_TAG`), by room ID, until opened. */
+    private var markedUnread = setOf<String>()
     /** Our photos, GIFs, videos and voice notes on their way or failed, by transaction ID: Retry sends the same file. */
     private val outgoing = mutableMapOf<String, Attachment>()
+    /** Each chat's sends, one after another (decision A12). */
+    private val sends = SendQueue()
+    private var demoSends = 0
     private var started = false
     private lateinit var appContext: Context
     /** Messages from before this process aren't news: they were there at launch, or came with history. */
     private var startedAt = 0L
+    /** The demo group's older messages, oldest first, still to load (`--ei group_older`). */
+    private var debugOlder = mutableListOf<Event>()
     /** Debug builds: a live account shown signed out until it logs in again (iOS's overridingStates), to check A3. */
     private var forcedSignedOut: String? = null
     /** Accounts logged in by mistake while fixing another (A3): stopped, and their updates dropped. */
@@ -139,6 +159,9 @@ object AppModel {
         signedOut: String? = null,
         demoIncoming: Boolean = false,
         demoBusy: Boolean = false,
+        demoReaction: Boolean = false,
+        demoGroupOlder: Int = 0,
+        demoGroupExtra: Int = 0,
     ) {
         forcedSignedOut = signedOut
         if (started) return
@@ -149,7 +172,7 @@ object AppModel {
         Notifier.channels(appContext)
         MediaFiles.init(context)
         Outgoing.sweep(context)
-        if (demo) return loadDemo(demoSignedOut, demoIncoming, demoBusy)
+        if (demo) return loadDemo(demoSignedOut, demoIncoming, demoBusy, demoReaction, demoGroupOlder, demoGroupExtra)
         requestRoom?.let { IGCore.setDebug(false, it.encodeToByteArray()) }
         prefs = context.getSharedPreferences("ferry", Context.MODE_PRIVATE)
         sessions = Sessions(context)
@@ -157,6 +180,7 @@ object AppModel {
         requestsSeen = read(REQUESTS_SEEN) ?: emptyMap()
         viewers += read<Map<String, IG.Viewer>>(VIEWERS).orEmpty()
         archived = read(ARCHIVED) ?: emptyMap()
+        markedUnread = read(MARKED_UNREAD) ?: emptySet()
         scopeKey = prefs.getString(SCOPE, "").orEmpty()
         val ids = sessions.accounts()
         for (id in ids) statuses[id] = Status("CONNECTING", null, now())
@@ -168,10 +192,12 @@ object AppModel {
     }
 
     /** `signedOut`: Kivo Studio needs a login (the banner, the thread's bar, A3). */
-    private fun loadDemo(signedOut: Boolean, incoming: Boolean, busy: Boolean) {
+    private fun loadDemo(signedOut: Boolean, incoming: Boolean, busy: Boolean, reaction: Boolean, groupOlder: Int, groupExtra: Int) {
         viewers += Demo.viewers
         for (id in Demo.viewers.keys) statuses[id] = Status(if (signedOut && id == Demo.KIVO) "BAD_CREDENTIALS" else "CONNECTED", null, now())
-        roomsState.value = Demo.rooms(now(), busy).associateByTo(mutableMapOf()) { it.id }
+        roomsState.value = Demo.rooms(now(), busy, groupExtra).associateByTo(mutableMapOf()) { it.id }
+        // `--ei group_older <n>`: the group opens from five messages and its spinner loads the rest (`loadOlder`).
+        if (groupOlder > 0) rooms["!debug-group"]?.let { debugOlder = Demo.mailboxCopy(it, groupOlder).toMutableList() }
         profiles = Demo.profiles
         loaded += Demo.viewers.keys
         updateAccounts()
@@ -184,13 +210,24 @@ object AppModel {
             notify(room, Timeline.notifiable(listOf(event), ME, startedAt))
             refresh()
         }, 10_000)
+        // `--ez reaction true`: Jonas Berg's chat gets a reaction and Instagram's log entry for it 10 s in (E2: the chat
+        // moves up, unread, with the words; D2: no notification, so `notify` must find nothing).
+        if (reaction) main.postDelayed({
+            val (id, events, unread) = Demo.reaction(now())
+            val room = rooms[id] ?: return@postDelayed
+            room.apply(fi.ferry.messenger.model.JoinedRoom(timeline = fi.ferry.messenger.model.JoinedRoom.Timeline(events, limited = false),
+                unreadNotifications = unread))
+            notify(room, Timeline.notifiable(events, ME, startedAt))
+            refresh()
+        }, 10_000)
     }
 
     /**
      * The cookies the login web view collected (the user just logged in): a new account, or a fresh session for
      * `relogin` (A3). Finishing as a different account than the one being fixed is refused, with who to log in as.
+     * `done` gets why it failed, or null.
      */
-    fun login(cookies: Map<String, String>, relogin: String? = null) {
+    fun login(cookies: Map<String, String>, relogin: String? = null, done: (error: String?) -> Unit) {
         connecting = true
         loginError = null
         val payload = json.encodeToString(cookies).encodeToByteArray()
@@ -199,6 +236,7 @@ object AppModel {
             main.post {
                 connecting = false
                 connected(null, result, relogin)
+                done(loginError)
             }
         }
     }
@@ -283,6 +321,7 @@ object AppModel {
      * isn't a request (core/chat rules.go); it reads here at once, as an update.
      */
     fun markRead(room: Room) {
+        if (room.isMarkedUnread) setMarkedUnread(false, room) // ours: nothing to tell Instagram (the demo's too)
         if (demo || room.id !in rooms) return
         thread { IGCore.markRead(room.id.encodeToByteArray()) }
     }
@@ -291,6 +330,18 @@ object AppModel {
     fun loadOlder(room: Room) {
         val cursor = room.prevBatch ?: return
         if (room.reachedStart || room.id in paginating) return
+        if (demo && cursor.startsWith("debug-older")) { // `--ei group_older`: 20 a page, half a second each
+            val chunk = debugOlder.takeLast(20).asReversed()
+            repeat(chunk.size) { debugOlder.removeAt(debugOlder.lastIndex) }
+            val page = MessagesPage(chunk, end = if (debugOlder.isEmpty()) null else "debug-older-${debugOlder.size}")
+            paginating = paginating + room.id
+            main.postDelayed({
+                paginating = paginating - room.id
+                room.prepend(page, cursor)
+                refresh()
+            }, 500)
+            return
+        }
         if (cursor == IGAdapter.START_TOKEN || demo) {
             room.prepend(MessagesPage(), cursor)
             roomsState.value = roomsState.value
@@ -334,16 +385,28 @@ object AppModel {
     }
 
     private fun deliver(pending: PendingMessage, room: Room) {
-        if (demo || room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
+        if (room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
         val text = Timeline.body(pending.content).encodeToByteArray()
         val replyTo = Timeline.replyTarget(pending.content).orEmpty().encodeToByteArray()
-        thread {
+        enqueue(room, pending) {
             val answer = IGCore.send(room.id.encodeToByteArray(), text, replyTo, pending.txnID.encodeToByteArray())?.decodeToString()
             val failure = failure(answer)
             val id = answer?.let { runCatching { json.decodeFromString<IG.Result>(it).id }.getOrNull() }
-            main.post {
-                update(room, pending.txnID, if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(id ?: pending.txnID))
-            }
+            if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(id ?: pending.txnID)
+        }
+    }
+
+    /**
+     * On the chat's send line (`SendQueue`, decision A12), after everything sent there before it: its answer ends the
+     * local echo's "Sending". The demo sends nothing, but takes a moment for each, so the order shows.
+     */
+    private fun enqueue(room: Room, pending: PendingMessage, upload: () -> PendingMessage.State) {
+        sends.submit(room.id) {
+            val state = if (demo) {
+                Thread.sleep(DEMO_SEND_MS)
+                PendingMessage.State.Failed("This is the demo: nothing is sent.")
+            } else runCatching(upload).getOrElse { PendingMessage.State.Failed("The engine returned nothing.") }
+            main.post { update(room, pending.txnID, state) }
         }
     }
 
@@ -421,7 +484,8 @@ object AppModel {
     private fun failure(answer: String?): String? =
         if (answer == null) "The engine returned nothing." else runCatching { json.decodeFromString<Failure>(answer).error }.getOrNull()
 
-    private fun newOTID(): String = if (demo) "demo-${now()}" else IGCore.newOTID()?.decodeToString().orEmpty()
+    // The demo's own: several sends in the same millisecond (a set) each need theirs.
+    private fun newOTID(): String = if (demo) "demo-${now()}-${++demoSends}" else IGCore.newOTID()?.decodeToString().orEmpty()
 
     // Requests (DESIGN I2/T2)
 
@@ -463,6 +527,17 @@ object AppModel {
     }
 
     private fun archiveTag(at: Long) = buildJsonObject { put(Inbox.ARCHIVED_AT_KEY, at) }
+
+    /**
+     * Mark as Unread / Read from the inbox: this phone only, as Archive. Opening the chat reads it (`markRead`), and
+     * sends Instagram nothing it wouldn't have: the engine's "Seen" goes only when Instagram had it unread.
+     */
+    fun setMarkedUnread(unread: Boolean, room: Room) {
+        room.tags = if (unread) room.tags + (Inbox.MARKED_UNREAD_TAG to JsonObject(emptyMap())) else room.tags - Inbox.MARKED_UNREAD_TAG
+        markedUnread = if (unread) markedUnread + room.id else markedUnread - room.id
+        write(MARKED_UNREAD, markedUnread)
+        refresh()
+    }
 
     // New message (DESIGN N1)
 
@@ -529,14 +604,14 @@ object AppModel {
 
     private fun deliverMedia(pending: PendingMessage, room: Room) {
         val attachment = outgoing[pending.txnID] ?: return update(room, pending.txnID, PendingMessage.State.Failed("The file is gone. Send it again."))
-        if (demo || room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
+        if (room.id !in rooms) return update(room, pending.txnID, PendingMessage.State.Failed("This is the demo: nothing is sent."))
         val voice = pending.content["msgtype"].string == "m.audio"
         val replyTo = Timeline.replyTarget(pending.content).orEmpty()
-        thread {
+        enqueue(room, pending) {
             val answer = IGCore.sendMedia(room.id.encodeToByteArray(), attachment.file.path.encodeToByteArray(), attachment.mimetype.encodeToByteArray(),
                 voice, replyTo.encodeToByteArray(), pending.txnID.encodeToByteArray())?.decodeToString()
             val failure = failure(answer)
-            main.post { update(room, pending.txnID, if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(pending.txnID)) }
+            if (failure != null) PendingMessage.State.Failed(failure) else PendingMessage.State.Sent(pending.txnID)
         }
     }
 
@@ -650,14 +725,16 @@ object AppModel {
         val seq = login.seq ?: 0
         if (seq <= appliedSeq) loaded += id else waiting[id] = seq
         updateInitialSync()
-        if (isNew) naming = id
+        if (isNew) {
+            justConnected = id
+            naming = id
+        }
         if (isNew) EngineService.start(appContext)
     }
 
-    /** On Welcome when there's no account yet, else as the screen's notice. */
+    /** The login screen shows it, with "Try again". */
     private fun loginFailed(message: String) {
         loginError = message
-        if (accounts.isNotEmpty()) actionError = message
     }
 
     /** A connection that failed; after a passing one the engine tries again every 30 s by itself (`Login`, `LoginFailed`). */
@@ -743,7 +820,10 @@ object AppModel {
                 setStatus(id, "CONNECTING")
                 thread { storeSession(id) }
             }
-            "LoginFailed" -> failed(id, update.code ?: "UNKNOWN_ERROR", update.error)
+            "LoginFailed" -> { // a retry, or the engine's own re-login after a resnapshot: Try Again may connect it again
+                running -= id
+                failed(id, update.code ?: "UNKNOWN_ERROR", update.error)
+            }
             "Room" -> apply(update)
             "RoomRemoved" -> update.room?.let { roomsState.value.remove(it) }
         }
@@ -764,8 +844,10 @@ object AppModel {
         if (initialSyncDone && timeline != null && timeline.limited != true) {
             Timeline.notifiable(timeline.events.orEmpty(), ME, startedAt).takeIf { it.isNotEmpty() }?.let { notify(room, it) }
         }
-        if (!room.isUnread) Notifier.clear(appContext, id)
+        // Instagram's counts, not `isUnread`: a chat marked unread here still loses a notification read elsewhere.
+        if (room.notificationCount == 0 && room.highlightCount == 0) Notifier.clear(appContext, id)
         archived[id]?.let { if (Inbox.ARCHIVED_TAG !in room.tags) room.tags = room.tags + (Inbox.ARCHIVED_TAG to archiveTag(it)) }
+        if (id in markedUnread && !room.isMarkedUnread) room.tags = room.tags + (Inbox.MARKED_UNREAD_TAG to JsonObject(emptyMap()))
         update.profiles?.let { profiles = profiles + it }
     }
 
@@ -785,6 +867,8 @@ object AppModel {
     private const val VIEWERS = "viewers"
     private const val SCOPE = "inbox.scope"
     private const val ARCHIVED = "archived"
+    private const val MARKED_UNREAD = "markedUnread"
     private const val RECENT_REACTIONS = "reactions.recent"
     private const val LOCAL = "local:"
+    private const val DEMO_SEND_MS = 600L
 }
