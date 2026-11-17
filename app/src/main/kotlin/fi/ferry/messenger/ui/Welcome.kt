@@ -1,6 +1,12 @@
 package fi.ferry.messenger.ui
 
+import android.animation.ValueAnimator
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Paint
+import android.os.PowerManager
 import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -30,6 +36,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.FloatState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -37,10 +53,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.nativeCanvas
@@ -48,7 +66,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.graphics.vector.toPath
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -63,7 +86,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.ferry.messenger.AppModel
 import fi.ferry.messenger.model.AccountColor
+import kotlin.math.PI
 import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * O1 (DESIGN O1, iOS `WelcomeView`): the wordmark and headline, the icon's ferry crossing a calm sea with two accounts
@@ -163,17 +191,37 @@ private fun Legal(modifier: Modifier = Modifier) {
 fun CrossingScene(scale: Float, modifier: Modifier = Modifier) {
     val dark = isSystemInDarkTheme()
     val sea = SeaColors(Scenery.seaHorizon, Scenery.seaFloor, Scenery.seaHaze, Scenery.foam, if (dark) 0.4f else 0.5f)
-    Canvas(
+    val motion = rememberMotion()
+    val clock = rememberCrossingClock(motion)
+    fun time() = if (motion == Crossing.Motion.STILL) null else clock.floatValue
+    // Changes only while the bubbles board, so afterwards the ferry's drawing is recorded once.
+    val boarding by remember(motion) { derivedStateOf { Crossing.boarding(time()) } }
+    Box(
         modifier.fillMaxWidth().height(Crossing.HEIGHT.dp * scale).clearAndSetSemantics {
             contentDescription = "A ferry carrying messages across calm water."
             role = Role.Image
         },
     ) {
-        // Everything below in dp; the ferry draws past the top of the canvas, which never sizes it.
-        scale(density, Offset.Zero) {
-            val pose = Crossing.Pose()
-            drawSea(size.width / density, scale, pose, sea)
-            drawFerry(size.width / density, scale, pose)
+        // Only drawing reads the clock: a frame redraws the sea and recomposes nothing. Everything inside in dp.
+        Canvas(Modifier.matchParentSize()) {
+            scale(density, Offset.Zero) { drawSea(size.width / density, scale, Crossing.pose(time()), sea) }
+        }
+        // The ferry in its own offscreen layer (iOS's overlay): its glide, bob and roll move the layer, not the drawing.
+        Canvas(
+            Modifier.matchParentSize().graphicsLayer {
+                val t = time()
+                val pose = Crossing.pose(t)
+                val ferry = Crossing.boarding(t).ferry
+                translationX = -28.dp.toPx() * (1 - ferry)
+                translationY = pose.bob.dp.toPx()
+                rotationZ = pose.roll
+                alpha = ferry.coerceIn(0f, 1f)
+                // Around the keel's centre: the artboard's (512, 700).
+                transformOrigin = TransformOrigin(0.5f, Crossing.keel(scale) / (Crossing.HEIGHT * scale))
+                compositingStrategy = CompositingStrategy.Offscreen
+            },
+        ) {
+            scale(density, Offset.Zero) { drawFerry(size.width / density, scale, boarding) }
         }
     }
 }
@@ -228,32 +276,46 @@ private fun DrawScope.drawSea(width: Float, k: Float, pose: Crossing.Pose, color
     drawPath(far, colors.foam, alpha = pose.wake[1], style = Stroke(2f, cap = StrokeCap.Round))
 }
 
-/** The icon's artboard at 0.3 (hull 210 dp wide), centred, its deck 6 dp below the horizon. */
-private fun DrawScope.drawFerry(width: Float, k: Float, pose: Crossing.Pose) {
+/**
+ * The icon's artboard at 0.3 (hull 210 dp wide), centred, its deck 6 dp below the horizon. It glides in from the left,
+ * then the bubbles board; afterwards it bobs and rolls around the keel.
+ */
+private fun DrawScope.drawFerry(width: Float, k: Float, boarding: Crossing.Boarding) {
     val s = Crossing.FERRY_SCALE * k
-    translate(width / 2 - 512 * s, (Crossing.HORIZON + 6) * k - 572 * s + pose.bob) {
-        rotate(pose.roll, Offset(512 * s, 700 * s)) { // around the keel's centre
-            scale(s, Offset.Zero) {
-                drawPath(FerryShape.hull, Color.White)
-                val (front, back) = Crossing.samples
-                bubble(FerryShape.backBubble, back, Offset(686f, 306f), 96f)
-                bubble(FerryShape.frontBubble, front, Offset(368f, 368f), 120f)
-            }
+    translate(width / 2 - 512 * s, Crossing.keel(k) - 700 * s) {
+        scale(s, Offset.Zero) {
+            drawPath(FerryShape.hull, Color.White)
+            val (front, back) = Crossing.samples
+            bubble(FerryShape.backBubble, back, Offset(686f, 306f), 96f, Offset(692.8f, 436.8f), boarding.back, 12 * k / s)
+            bubble(FerryShape.frontBubble, front, Offset(368f, 368f), 120f, Offset(359.5f, 535f), boarding.front, 12 * k / s)
         }
     }
 }
 
-/** A bubble in the account's colour with its mark in white, in the artboard's units. */
-private fun DrawScope.bubble(path: Path, rider: Crossing.Rider, mark: Offset, fontSize: Float) {
-    drawPath(path, rider.color.fillColor)
+/**
+ * A bubble in the account's colour with its mark in white, in the artboard's units: boarding (0 → 1), it rises
+ * `rise` from the deck as it scales up from 0.6 around its tail's `base`.
+ */
+private fun DrawScope.bubble(path: Path, rider: Crossing.Rider, mark: Offset, fontSize: Float, base: Offset, boarded: Float, rise: Float) {
+    val alpha = boarded.coerceIn(0f, 1f)
+    if (alpha == 0f) return
+    translate(0f, rise * (1 - boarded)) {
+        scale(0.6f + 0.4f * boarded, base) {
+            drawPath(path, rider.color.fillColor, alpha = alpha)
+            drawMark(rider.mark, mark, fontSize, alpha)
+        }
+    }
+}
+
+private fun DrawScope.drawMark(text: String, center: Offset, fontSize: Float, alpha: Float) {
     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.White.toArgb()
+        color = Color.White.copy(alpha = alpha).toArgb()
         textSize = fontSize
         textAlign = Paint.Align.CENTER
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
     val metrics = paint.fontMetrics
-    drawContext.canvas.nativeCanvas.drawText(rider.mark, mark.x, mark.y - (metrics.ascent + metrics.descent) / 2, paint)
+    drawContext.canvas.nativeCanvas.drawText(text, center.x, center.y - (metrics.ascent + metrics.descent) / 2, paint)
 }
 
 /** Half-sine arches along `y`, each `half` long (negative runs right to left), alternately up and down (iOS `addArches`). */
@@ -276,6 +338,9 @@ object Crossing {
     const val EDGE_WAVELENGTH = 131f
     val SWELL_WAVELENGTHS = listOf(120f, 160f)
 
+    /** Where the keel's centre (the artboard's 512, 700) sits in the scene: the deck (572) is 6 below the horizon. */
+    fun keel(scale: Float) = (HORIZON + 6) * scale + (700 - 572) * FERRY_SCALE * scale
+
     class Rider(val color: AccountColor, val mark: String)
 
     /** Front and back bubble: Welcome shows only before any account, so always iOS's samples (Ocean "A", Ember "S"). */
@@ -294,6 +359,99 @@ object Crossing {
         /** The wake's two strokes' opacity. */
         val wake: List<Float> = listOf(0.5f, 0.5f),
     )
+
+    /** `t` seconds into the crossing; null is at rest. */
+    fun pose(t: Float?): Pose {
+        if (t == null) return Pose()
+        val wake = 0.175f * sin(2 * PI.toFloat() * t / 2.4f)
+        return Pose(
+            bob = 1.5f * sin(2 * PI.toFloat() * t / 4.8f),
+            roll = 0.8f * sin(2 * PI.toFloat() * t / 6.4f + 1.1f),
+            swell = listOf((t * 8) % SWELL_WAVELENGTHS[0], (t * 5) % SWELL_WAVELENGTHS[1]),
+            edge = (t * 3) % EDGE_WAVELENGTH,
+            wake = listOf(0.525f + wake, 0.525f - wake),
+        )
+    }
+
+    /** How far each part has come aboard (0 → 1, a spring may pass 1): the ferry, then the front and back bubbles. */
+    data class Boarding(val ferry: Float, val front: Float, val back: Float)
+
+    /**
+     * The entrance, once per appearance (none at rest): the ferry glides in over 0.7 s, the bubbles board with a
+     * spring (0.55 s, bounce 0.3), the front at 0.25 s and the back at 0.40 s.
+     */
+    fun boarding(t: Float?): Boarding {
+        if (t == null) return Boarding(1f, 1f, 1f)
+        return Boarding(spring(t, 0.7f, 0f), spring(t - 0.25f, 0.55f, 0.3f), spring(t - 0.40f, 0.55f, 0.3f))
+    }
+
+    /** SwiftUI's `spring(duration:bounce:)` from 0 toward 1, `t` seconds after it starts (0 before). */
+    fun spring(t: Float, duration: Float, bounce: Float): Float {
+        if (t <= 0f) return 0f
+        if (t >= 4 * duration) return 1f // settled: the bubbles' drawing stops changing
+        val w = 2 * PI.toFloat() / duration
+        val damping = 1 - bounce
+        if (damping >= 1f) return 1 - (1 + w * t) * exp(-w * t)
+        val wd = w * sqrt(1 - damping * damping)
+        return 1 - exp(-damping * w * t) * (cos(wd * t) + damping * w / wd * sin(wd * t))
+    }
+
+    enum class Motion {
+        /** Drawn once at rest: a level ferry, bubbles aboard, no entrance. */
+        STILL,
+        /** Frozen where it is: the app isn't in front. */
+        PAUSED,
+        RUNNING,
+    }
+
+    /** iOS's rules: still with animations off (Android's Reduce Motion) or battery saver on (Low Power Mode). */
+    fun motion(animationsOff: Boolean, powerSave: Boolean, resumed: Boolean): Motion = when {
+        animationsOff || powerSave -> Motion.STILL
+        resumed -> Motion.RUNNING
+        else -> Motion.PAUSED
+    }
+}
+
+/**
+ * `Crossing.motion` for the screen (iOS `AmbientMotion`, shared with O4's deck): the system's animator duration scale
+ * (read again each time the app comes back), battery saver (as it changes), and whether the app is resumed.
+ */
+@Composable
+fun rememberMotion(): Crossing.Motion {
+    val context = LocalContext.current
+    val power = remember { context.getSystemService(PowerManager::class.java) }
+    var powerSave by remember { mutableStateOf(power.isPowerSaveMode) }
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) { powerSave = power.isPowerSaveMode }
+        }
+        ContextCompat.registerReceiver(context, receiver, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    val state by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val resumed = state.isAtLeast(Lifecycle.State.RESUMED)
+    val animationsOff = remember(resumed) { !ValueAnimator.areAnimatorsEnabled() }
+    return Crossing.motion(animationsOff, powerSave, resumed)
+}
+
+/** Seconds the scene has run, counted only while `motion` is RUNNING (else frozen), at most 30 times a second (as iOS). */
+@Composable
+fun rememberCrossingClock(motion: Crossing.Motion): FloatState {
+    val clock = remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(motion) {
+        if (motion != Crossing.Motion.RUNNING) return@LaunchedEffect
+        var last = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { now ->
+                val dt = (now - last) / 1e9f
+                if (dt >= 0.032f) {
+                    clock.floatValue += minOf(dt, 0.1f) // a stall doesn't jump the sea
+                    last = now
+                }
+            }
+        }
+    }
+    return clock
 }
 
 /**
