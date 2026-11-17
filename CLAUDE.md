@@ -12,8 +12,10 @@ known limitations are in [docs/DECISIONS.md](docs/DECISIONS.md)): the time in ev
 day, links, reaction pills, TalkBack's one label per bubble, swipe to reply (toward the end), mark as unread, up to 10
 photos and videos on a per-chat send line, paste and keyboard images, the camera from +, rotation and dark mode keeping
 the open chat, the engine at iOS 1.7 (reaction log entries, camera media). Checked on the demo and the headless emulator
-by two independent testers (a fix round after each); nothing of it was checked live (no Instagram action was made),
-nor with TalkBack, haptics or on a real phone: the list is in DECISIONS.md. iOS 1.5.1 (2026-10-23): the 0.3 s hold, holding any card (an opened set's too), and the link preview's
+by two independent testers (a fix round after each), then live on the signed release build between the dummies
+(2026-11-17, the emulator: send with a link, swipe to reply, three photos in their order, a reaction moving the chat up
+unread, the other account's notification; after R4 a removal and a re-login through the new login screen, O4 and O5).
+Not with TalkBack, haptics or on a real phone: the list is in DECISIONS.md. iOS 1.5.1 (2026-10-23): the 0.3 s hold, holding any card (an opened set's too), and the link preview's
 picture and tap, the last a gap from before; checked on the demo. iOS 1.1–1.2's last gaps (2026-10-22): Chat Info (`ui/ChatInfo.kt`) and the person card, Share in the
 photo viewer and Share All, swipe to archive, pull to refresh, drag to reorder accounts; checked on the demo. With it
 Android has all of iOS 1.0–1.5. iOS 1.5 parity (2026-10-22): the iOS logo and launch screen; a chat that opens unread holds its "New
