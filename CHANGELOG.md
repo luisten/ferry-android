@@ -87,3 +87,8 @@ The first version for friends: what the iPhone app has up to its 1.7.
 - Turning the phone, switching to dark mode or changing the text size keeps you in the chat, with what you were
   writing.
 - The chat list shows a new message as it arrives: the row's words, time and unread dot change at once.
+
+### Fixed
+
+- A link's preview card showed l.instagram.com or l.facebook.com, Instagram's redirect, instead of the site's address,
+  and opened the link through that redirect. It now shows the site and opens the link itself (the engine of iOS 1.7.1).

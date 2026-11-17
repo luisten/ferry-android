@@ -21,7 +21,7 @@ require (
 	github.com/icholy/digest v1.2.0 // indirect
 	github.com/imroc/req/v3 v3.56.0 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
-	github.com/luisten/ferry-messenger/core v0.0.0-20261112152829-70aa388f2ba4 // indirect
+	github.com/luisten/ferry-messenger/core v0.0.0-20261117045050-2d2db9d92cdc // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/petermattis/goid v0.0.0-20260820044319-269ab09b5261 // indirect
