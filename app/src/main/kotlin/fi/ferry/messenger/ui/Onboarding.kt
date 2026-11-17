@@ -45,6 +45,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
@@ -195,17 +197,7 @@ fun NameAccountScreen(id: String, done: (addAnother: Boolean) -> Unit) {
     var offerAnother by remember { mutableStateOf(false) }
     val first = AppModel.accounts.size <= 1
     BackHandler { done(false) }
-    if (offerAnother) {
-        Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
-            Column(Modifier.padding(padding).fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically)) {
-                Text("Add another account?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text("Connect a second Instagram account. Each chat stays tied to the account it belongs to.", style = MaterialTheme.typography.bodyLarge)
-                Button({ done(true) }, Modifier.fillMaxWidth()) { Text("Connect another account") }
-                TextButton({ done(false) }, Modifier.fillMaxWidth()) { Text("Not now") }
-            }
-        }
-        return
-    }
+    if (offerAnother) return AddAnotherScreen(id, connect = { done(true) }, notNow = { done(false) })
     val identity = draft ?: return done(false)
     val valid = AccountIdentity.problems(identity, id, AppModel.identities).isEmpty()
     fun save(): Boolean {
@@ -238,6 +230,57 @@ fun NameAccountScreen(id: String, done: (addAnother: Boolean) -> Unit) {
             }
         }
     }
+}
+
+/**
+ * O6 "Add another account?" (DESIGN O6, iOS `AddAnotherView`), after the first account only: your account and a free
+ * seat side by side on one deck, then the question, with the two buttons at the bottom.
+ */
+@Composable
+private fun AddAnotherScreen(id: String, connect: () -> Unit, notNow: () -> Unit) {
+    val login = AppModel.accounts.firstOrNull { it.id == id }
+    val identity = AppModel.identities[id]
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        bottomBar = {
+            Column(Modifier.navigationBarsPadding().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                BarButton("Connect another account", onClick = connect)
+                TextButton(notNow, Modifier.heightIn(min = 48.dp)) { Text("Not now", style = MaterialTheme.typography.bodyLarge) }
+            }
+        },
+    ) { padding ->
+        Column(
+            Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            FerryDeck(210.dp, Modifier.padding(top = 80.dp, bottom = 12.dp)) {
+                // 16 dp between the pictures: the ring takes 4 of them outside the avatar's.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AccountAvatar(identity, login?.profile?.avatar, identity?.name ?: login?.displayName.orEmpty(), 88.dp, mark = true)
+                    Seat()
+                }
+            }
+            Text("Add another account?", Modifier.semantics { heading() },
+                style = TextStyle(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold), textAlign = TextAlign.Center)
+            Text("Connect a second Instagram account. Each chat stays tied to the account it belongs to.",
+                style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+/** O6's free seat: a dashed 88 dp circle with a plus. */
+@Composable
+private fun Seat() {
+    val line = MaterialTheme.colorScheme.onSurfaceVariant
+    Box(
+        Modifier.size(88.dp).background(MaterialTheme.colorScheme.background, CircleShape).drawBehind {
+            val width = 2.dp.toPx()
+            drawCircle(line, radius = size.minDimension / 2 - width / 2,
+                style = Stroke(width, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx()))))
+        },
+        contentAlignment = Alignment.Center,
+    ) { Icon(Icons.add, null, Modifier.size(32.dp), tint = line) }
 }
 
 /** O4's steps as plain logic. */
