@@ -3,7 +3,7 @@
 Your Instagram messages in a calm app of their own: the chats, without the feed. This is the Android version of
 [Ferry Messenger](https://github.com/luisten/ferry-messenger) for iPhone.
 
-**Version 1.7, a test version for friends.** It matches the iPhone app's 1.7: your chats from every account in one inbox,
+**Version 1.7.1, a test version for friends.** It matches the iPhone app's 1.7.1: your chats from every account in one inbox,
 requests and folders; reading and answering with replies, reactions, edits, photos, videos, voice messages and links;
 swiping a message to reply; marking a chat as unread; sending several photos and videos at once or taking one with
 the camera; new messages as notifications. [CHANGELOG.md](CHANGELOG.md) lists it all.

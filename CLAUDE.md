@@ -7,7 +7,7 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** iOS 1.7 parity (2026-11-17, branch `ios-1.7-parity`, version 1.7, code 17; the decisions A12–A56 and the
+**Status:** iOS 1.7.1 parity (2026-11-17, built on branch `ios-1.7-parity`; version 1.7.1, code 18, decision A78; the decisions A12–A56 and the
 known limitations are in [docs/DECISIONS.md](docs/DECISIONS.md)): the time in every bubble, day chips and the floating
 day, links, reaction pills, TalkBack's one label per bubble, swipe to reply (toward the end), mark as unread, up to 10
 photos and videos on a per-chat send line, paste and keyboard images, the camera from +, rotation and dark mode keeping

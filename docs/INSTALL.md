@@ -1,6 +1,6 @@
 # Installing Ferry Messenger on Android
 
-This is a test version (1.7) for friends. It isn't in an app store: you install a file by hand. It takes about five
+This is a test version (1.7.1) for friends. It isn't in an app store: you install a file by hand. It takes about five
 minutes.
 
 **You need:** an Android 8.0 or newer phone with a 64-bit ARM processor (nearly every phone of the last years), an
@@ -39,7 +39,7 @@ To check that your file is the developer's, its signing certificate's SHA-256 fi
 
 `75:D2:47:FA:A0:92:7E:AF:BD:35:8B:A6:B1:F2:5B:AD:6E:F5:E6:6A:40:6C:7A:14:73:E4:9B:A2:E0:79:ED:C4`
 
-(`apksigner verify --print-certs ferry-messenger-1.7.apk`, from the Android SDK's build-tools, shows it.)
+(`apksigner verify --print-certs ferry-messenger-1.7.1.apk`, from the Android SDK's build-tools, shows it.)
 
 ## Good to know
 

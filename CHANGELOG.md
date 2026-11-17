@@ -5,9 +5,9 @@ What changes for people who use the app, in plain words. The format is
 
 ## [Unreleased]
 
-## [1.7] - 2026-11-17
+## [1.7.1] - 2026-11-17
 
-The first version for friends: what the iPhone app has up to its 1.7.
+The first version for friends: what the iPhone app has up to its 1.7.1.
 
 ### Added
 
@@ -90,5 +90,7 @@ The first version for friends: what the iPhone app has up to its 1.7.
 
 ### Fixed
 
+The iPhone app's 1.7.1.
+
 - A link's preview card showed l.instagram.com or l.facebook.com, Instagram's redirect, instead of the site's address,
-  and opened the link through that redirect. It now shows the site and opens the link itself (the engine of iOS 1.7.1).
+  and opened the link through that redirect. It now shows the site and opens the link itself.
