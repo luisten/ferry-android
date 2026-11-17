@@ -475,18 +475,7 @@ private fun ThreadContent(roomID: String, back: () -> Unit, relogin: (String) ->
     if (info) ChatInfoScreen(room) { info = false }
     person?.let { user -> PersonCard(people.name(user), profiles[user]?.handle, people.avatar(user)) { person = null } }
     viewer?.let { MediaViewer(it) { viewer = null } }
-    if (confirmingDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmingDelete = false },
-            title = { Text("Delete request from ${room.name}?") },
-            // ponytail: iOS's copy; whether Instagram shows the requester a "Seen" is untested, so it keeps the warning.
-            text = { Text("It's deleted from ${login?.profile?.username?.let { "@$it's" } ?: "your"} Instagram inbox too. They may see it as read.") },
-            confirmButton = {
-                TextButton({ confirmingDelete = false; AppModel.deleteRequest(room); back() }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = { TextButton({ confirmingDelete = false }) { Text("Cancel") } },
-        )
-    }
+    if (confirmingDelete) DeleteRequestDialog(room, { confirmingDelete = false }) { AppModel.deleteRequest(room); back() }
 }
 
 /**

@@ -109,6 +109,7 @@ import fi.ferry.messenger.model.MediaInfo
 import fi.ferry.messenger.model.Message
 import fi.ferry.messenger.model.MessageKind
 import fi.ferry.messenger.model.RecentReactions
+import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.Timeline
 import fi.ferry.messenger.model.get
 import fi.ferry.messenger.model.string
@@ -704,6 +705,20 @@ fun RequestBar(requester: String, identity: AccountIdentity?, accept: () -> Unit
             Text(" · replying accepts", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** "Delete request from X?", in the thread's request bar and in the Requests list: the same words, then `confirm`. */
+@Composable
+fun DeleteRequestDialog(room: Room, dismiss: () -> Unit, confirm: () -> Unit) {
+    val login = AppModel.accounts.firstOrNull { it.id == room.bridge?.receiver }
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text("Delete request from ${room.name}?") },
+        // ponytail: iOS's copy; whether Instagram shows the requester a "Seen" is untested, so it keeps the warning.
+        text = { Text("It's deleted from ${login?.profile?.username?.let { "@$it's" } ?: "your"} Instagram inbox too. They may see it as read.") },
+        confirmButton = { TextButton({ dismiss(); confirm() }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(dismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
