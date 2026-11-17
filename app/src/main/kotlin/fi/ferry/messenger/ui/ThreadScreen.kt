@@ -402,7 +402,7 @@ private fun ThreadContent(roomID: String, back: () -> Unit, relogin: (String) ->
     }
     var viewer by remember { mutableStateOf<Viewer?>(null) }
     // GIFs play in a chat, not in a request (nothing there should move before it's accepted).
-    val media = MediaContext(room, autoplay = !Inbox.isRequest(room)) { viewer = it }
+    val media = MediaContext(room, autoplay = !Inbox.isRequest(room), people::firstName) { viewer = it }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -474,7 +474,7 @@ private fun ThreadContent(roomID: String, back: () -> Unit, relogin: (String) ->
     }
     if (info) ChatInfoScreen(room) { info = false }
     person?.let { user -> PersonCard(people.name(user), profiles[user]?.handle, people.avatar(user)) { person = null } }
-    viewer?.let { MediaViewer(it) { viewer = null } }
+    viewer?.let { MediaViewer(it, identity) { viewer = null } }
     if (confirmingDelete) DeleteRequestDialog(room, { confirmingDelete = false }) { AppModel.deleteRequest(room); back() }
 }
 
