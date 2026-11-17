@@ -432,6 +432,8 @@ fun AccountScreen(id: String, back: () -> Unit, relogin: (String) -> Unit) {
         },
     ) { padding ->
         if (login == null) {
+            // Removed from here or from elsewhere: leave, as iOS dismisses the page.
+            LaunchedEffect(Unit) { back() }
             Box(Modifier.padding(padding)) { Empty(Icons.person, "Account removed", "Its chats left Ferry Messenger on this phone.") }
             return@Scaffold
         }

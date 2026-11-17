@@ -225,7 +225,7 @@ private fun DrawScope.drawSea(width: Float, k: Float, pose: Crossing.Pose, color
     val horizon = Crossing.HORIZON * k
     val edge = Crossing.EDGE * k
     drawRect(Brush.verticalGradient(listOf(colors.haze.copy(alpha = 0f), colors.haze), horizon - 40 * k, horizon),
-        Offset(0f, horizon - 40 * k), Size(width, 40 * k))
+        Offset(-Crossing.EDGE_WAVELENGTH, horizon - 40 * k), Size(width + 2 * Crossing.EDGE_WAVELENGTH, 40 * k))  // as wide as the band
 
     // The band runs well past both sides so its drifting edge always covers the width.
     val half = Crossing.EDGE_WAVELENGTH / 2
