@@ -103,6 +103,20 @@ class DemoTests {
         assertTrue(Timeline.notifiable(events, me, now - 1).isEmpty())
     }
 
+    @Test fun miraHasAPlainVideoAndALoadedReelForThePlayer() {
+        val media = Timeline.reduce(room("!debug-demo-media"), me)
+        val videos = media.filter { fi.ferry.messenger.model.MediaInfo(it.content).url in Demo.videos }
+        assertEquals(2, videos.size)
+        val (own, reel) = videos
+        assertTrue(own.isOwn && own.kind == MessageKind.Video)
+        assertNull(fi.ferry.messenger.model.MediaInfo(own.content).externalURL) // the player's plain video: no author or caption
+        assertEquals(MessageKind.Share(MessageKind.ShareType.REEL, MessageKind.ShareState.READY), reel.kind)
+        assertEquals(media.last(), reel) // the newest, so it shows as the chat opens
+        val caption = fi.ferry.messenger.model.ShareCaption.of(reel.content)
+        assertEquals("tidepool.films", caption.author)
+        assertTrue(caption.caption!!.lines().size > 2) // longer than the player's two lines
+    }
+
     @Test fun connectingShowsTamoSyncedOrKivoFailed() {
         val tamo = IGAdapter.login(Demo.connecting(signedOut = false), Demo.viewers[Demo.TAMO], "CONNECTED", since = now)
         assertEquals(Demo.TAMO, tamo.id)

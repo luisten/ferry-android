@@ -41,6 +41,15 @@ object Demo {
     /** The chat of `--ez reaction true`: Jonas Berg (read), whose first message is ours. */
     private const val REACTION_ROOM = "!debug-demo-3"
 
+    private const val OWN_VIDEO = "https://scontent.example.invalid/v/demo-video.mp4"
+    private const val REEL_VIDEO = "https://scontent.example.invalid/v/demo-reel.mp4"
+    private const val REEL_CAPTION = "Low tide at the north pier, filmed at six before the first ferry. Sound on for the gulls.<br/>" +
+        "Shot on a phone, no filters, no music: just the water, the ropes and the boards.<br/><br/>" +
+        "The full version is on the channel, with the harbour master's story of the storm that took the old pier in 1987."
+
+    /** Mira Holt's two videos (ours and a reel): the player opens on them, from the clip `MainActivity` caches under these links. */
+    val videos = listOf(OWN_VIDEO, REEL_VIDEO)
+
     /** `--ez connecting true`: O4 for Tamo (connected, its chats synced), or with `signed_out` for Kivo (failed). */
     fun connecting(signedOut: Boolean) = if (signedOut) KIVO else TAMO
 
@@ -309,7 +318,9 @@ object Demo {
 
     /**
      * One chat of media in the engine's shapes (core/chat): an album, a voice note, a link with its preview, a reel to
-     * load, a video, a GIPHY sticker. Their links go nowhere (`example.invalid`), so the cards show their layout and a failed download.
+     * load, a video, a GIPHY sticker, a loaded reel. Their links go nowhere (`example.invalid`), so the cards show their
+     * layout and a failed download, except the two videos (`videos`): `MainActivity` puts a small clip in the cache under
+     * their links, so they open the player.
      */
     private fun media(now: Long): Room {
         val mira = "17841400000000205"
@@ -343,12 +354,18 @@ object Demo {
                 putJsonObject("com.beeper.unresolved_media") { put("target_url", "https://www.instagram.com/reel/DEMO123/"); put("target_id", "1") }
             }),
             Triple(true, 30, buildJsonObject {
-                put("msgtype", "m.video"); put("body", ""); put("url", "$cdn-video.mp4")
+                put("msgtype", "m.video"); put("body", ""); put("url", OWN_VIDEO)
                 putJsonObject("info") { put("mimetype", "video/mp4"); put("w", 1080); put("h", 1920); put("duration", 8_000); put("thumbnail_url", "$cdn-video-preview.jpg") }
             }),
             Triple(false, 6, buildJsonObject {
                 put("msgtype", "m.image"); put("body", ""); put("url", "$cdn-sticker.webp"); put("fi.ferry.sticker", true)
                 putJsonObject("info") { put("mimetype", "image/webp"); put("fi.mau.gif", true); put("w", 200); put("h", 200); put("thumbnail_url", "$cdn-sticker.jpg") }
+            }),
+            // A reel already loaded, as the engine's edit leaves it (engine_shares.json "resolved"), with a long caption.
+            Triple(false, 3, buildJsonObject {
+                put("msgtype", "m.video"); put("body", "Sent a reel"); put("url", REEL_VIDEO); put("external_url", "https://www.instagram.com/reel/DEMO456/")
+                put("format", "org.matrix.custom.html"); put("formatted_body", "<strong>tidepool.films</strong><p>$REEL_CAPTION</p>")
+                putJsonObject("info") { put("mimetype", "video/mp4"); put("w", 720); put("h", 1280); put("duration", 6_000); put("thumbnail_url", "$cdn-reel-2.jpg") }
             }),
         )
         val events = listOf(

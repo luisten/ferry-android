@@ -30,6 +30,7 @@ import fi.ferry.messenger.ui.ReloginDialog
 import fi.ferry.messenger.ui.ThreadScreen
 import fi.ferry.messenger.ui.Welcome
 import java.io.File
+import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
     companion object {
@@ -67,6 +68,7 @@ class MainActivity : ComponentActivity() {
             AppModel.naming = it
         }
         if (demo && intent.getBooleanExtra("clipboard", false)) demoClipboard()
+        if (demo) demoVideos()
         setContent { FerryTheme { App() } }
     }
 
@@ -80,6 +82,21 @@ class MainActivity : ComponentActivity() {
         }
         val clip = ClipData("Demo photos", arrayOf("image/jpeg"), ClipData.Item(uris[0])).apply { addItem(ClipData.Item(uris[1])) }
         getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
+    }
+
+    /**
+     * The demo's videos (`Demo.videos`) as already downloaded: a 6 s clip of debug builds' own (`src/debug/assets`),
+     * so the player can be checked without Instagram.
+     */
+    private fun demoVideos() = thread {
+        val clip = File(cacheDir, "demo-clip.mp4")
+        try {
+            assets.open("demo-clip.mp4").use { input -> clip.outputStream().use { input.copyTo(it) } }
+        } catch (_: java.io.IOException) {
+            return@thread
+        }
+        Demo.videos.forEach { MediaFiles.adopt(clip, it, "video/mp4") }
+        clip.delete()
     }
 
     /**
