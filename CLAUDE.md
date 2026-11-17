@@ -40,7 +40,7 @@ applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`
 its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
 JNI bridge, the login. A9 (2026-11-17): the signed release APK (`assembleRelease`, the key from Gradle properties: Commands) and the friends'
 install guide, [docs/INSTALL.md](docs/INSTALL.md), which carries the signing certificate's fingerprint; its install on a
-real phone is still to be seen. The engine is pinned at 70aa388 (The engine). The README and the install guide are for
+real phone is still to be seen. The engine is pinned at 2d2db9d, iOS 1.7.1 (The engine). The README and the install guide are for
 users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
 user-visible change adds a line under Unreleased.
 
@@ -82,8 +82,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 
 ## The engine
 
-- **Pinned in `go.mod`** as `github.com/luisten/ferry-messenger/core` at a commit (pseudo-version; now `70aa388`, the
-  iOS repo's v1.7), its `cmd/igcore` named by a `tool` line so `go mod tidy` keeps it. Bump:
+- **Pinned in `go.mod`** as `github.com/luisten/ferry-messenger/core` at a commit (pseudo-version; now `2d2db9d`, the
+  iOS repo's 1.7.1: the link shim unwrapped, A77), its `cmd/igcore` named by a `tool` line so `go mod tidy` keeps it. Bump:
   `GOTOOLCHAIN=local go get -tool github.com/luisten/ferry-messenger/core/cmd/igcore@<commit>` and `GOTOOLCHAIN=local go mod tidy`
   (`build-engine.sh` checks the Go version the same way; a plain `go` command may download a newer toolchain), then check that
   `go.mod`'s `replace` still matches core's own (Go doesn't carry a dependency's `replace` over: without it the build
@@ -100,7 +100,7 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   builds the worktree's engine. Once the user merges it there, pin that commit and delete `go.work`.
 - `IGCore.pause()`/`unpause()` (`IGPause`/`IGUnpause`) are declared and never called: E8 keeps the sockets open. `IGStop`
   marks an account removed (Remove Account and a refused re-login are its two callers, as intended).
-- The library is ~17.9 MB (17,861,624 bytes at 70aa388), stored uncompressed and 16 KB-aligned in the APK (Android 15+ phones need the alignment;
+- The library is ~17.9 MB (17,862,552 bytes at 2d2db9d), stored uncompressed and 16 KB-aligned in the APK (Android 15+ phones need the alignment;
   NDK r30 does it). arm64-v8a only (`abiFilters`).
 
 ## Invariants
