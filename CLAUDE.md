@@ -20,7 +20,7 @@ Android has all of iOS 1.0–1.5. iOS 1.5 parity (2026-10-22): the iOS logo and 
 messages" line; the jump-to-newest button; listening back to a voice note; the long press's reaction sheet with recent
 and any emoji; iOS's thread header, composer and inbox bottom bar. A8 (2026-10-22), first part: notifications by E8's option 1 (the user's choice: a foreground service,
 `EngineService`, keeps the engine connected while Ferry is closed; `Notifier`); checked on the demo. Still A8: days on a
-real phone for battery and phone makers' battery savers, and whether Instagram minds the connection. A7: accounts (`ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
+real phone for battery and phone makers' battery savers, and whether Instagram minds the connection. A7: accounts (`ui/Welcome.kt`, `ui/Onboarding.kt`, `ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
 another account?" after the first, the identity editor, each account's page with Remove Account, the signed-out
 prompt and bar, the inbox's banner; `AppModel.login(relogin)` refuses a different account). A6 and A7 checked live
 2026-10-22 (re-login, a photo and a voice note to kivostudio, the viewer, Load story on an expired story). A6: media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
@@ -48,7 +48,7 @@ user-visible change adds a line under Unreleased.
 . docs/local/env.sh        # gitignored; sets JAVA_HOME (~/Library/Android/jdk/jdk-21.0.13+9/Contents/Home), ANDROID_HOME (~/Library/Android/sdk)
                            # and PATH (Homebrew's Go 1.27.3 in /opt/homebrew/bin, the JDK, platform-tools, emulator)
 ./gradlew assembleDebug                         # runs build-engine.sh (libigcore.so, arm64-v8a), then the APK
-./gradlew testDebugUnitTest                     # the model's tests, on the JVM, 208, ~5 s (results: app/build/test-results)
+./gradlew testDebugUnitTest                     # the model's and the screens' pure logic, on the JVM, 218, ~5 s (results: app/build/test-results)
 ./gradlew assembleRelease                       # app/build/outputs/apk/release/app-release.apk; lintVitalRelease runs with it
 B=$ANDROID_HOME/build-tools/36.0.0; A=app/build/outputs/apk/release/app-release.apk
 $B/apksigner verify --print-certs $A            # one signer, CN=Ferry Messenger; its SHA-256 is the one in docs/INSTALL.md
@@ -202,7 +202,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **iOS parity is UI too** (the user, 2026-10-22): the same logo, layout and copy as the iOS app, in Material.
   The icon is the iOS repo's `docs/design/ferry-icon-color.svg` with its paths copied verbatim into the adaptive
   icon (`res/drawable/ic_launcher_*`, the 1024 artboard centred in the 108 dp layer), the themed icon and the
-  launch mark (dark: `ferry-icon-color-dark.svg`'s colours). Redo them when the SVGs change.
+  launch mark (dark: `ferry-icon-color-dark.svg`'s colours), and `FerryShape` (`ui/Welcome.kt`: Welcome's scene and the
+  onboarding deck draw from its path strings). Redo them when the SVGs change.
 - **Opening a thread** (iOS 1.5): unread, it holds the "New messages" line under the last message read unless what's
   new reaches less than a quarter screen past it; hidden until placed (1 s at most). The list is reversed, so the
   placement measures offsets after `scrollToItem` (a chat's start clamps it). A touch, the jump button or a send
@@ -273,7 +274,10 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   .m4a, 44.1 kHz mono 64 kbit/s, sent as audio/mp4 with the voice flag; a tap records hands-free, a hold sends when
   let go after a second, five minutes sends itself, leaving the thread or the app throws it away.
 - **Colour means account** (DESIGN §0.1): the theme replaces Material's tonal palette with greys (`ui/Theme.kt`); the
-  only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name. Glyphs are a few
+  only colours are the accounts' (`AccountColor`: fill, ink, wash), each always with its mark or name, and Welcome's sea
+  (`Scenery`, scenery only: never text, a control or chrome). Grouped pages (O5, A1, A2) use `Grouped.page` and
+  `.card`; a mark over an avatar on a card takes `LocalMarkRing` for its cut-out. Welcome's and O4's motion follow
+  `Crossing.motion` (still with animations off or battery saver, paused below RESUMED). Glyphs are a few
   Material Icons path strings in `ui/Icons.kt`, not a library. iOS draws SF Symbols, which Apple licenses for its
   platforms only: pick the closest Material icon (`tray.2` → `all_inbox`, outlined) and match the button around it. Profile pictures load https only, in memory (`Pictures`).
 - An account gets its default name, colour and mark (`AccountIdentity.withDefaults`) only once Instagram has said who

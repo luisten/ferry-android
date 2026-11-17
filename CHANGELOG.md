@@ -32,6 +32,9 @@ The first version for friends: what the iPhone app has up to its 1.7.
 - Send photos, videos and GIFs (the + in the message bar), and voice messages (tap the mic, or hold it). Where a photo
   was taken never leaves your phone: location and other details are removed first.
 - A welcome screen, and after each login a name, colour and mark for the account, so its chats are easy to tell apart.
+- The welcome screen shows Ferry's ferry crossing the sea with two accounts aboard, and logging in, connecting, naming
+  an account, adding another and the Accounts pages look as they do on the iPhone. The login page says when it's
+  loading and connecting, and offers "Try again" when it can't connect.
 - Accounts: see each account's state, rename it or change its colour and mark, log in again when Instagram signs you
   out (a banner and the chat say so), or remove an account from this phone.
 - Notifications for new messages, saying which of your accounts each one is for. Ferry stays connected in the

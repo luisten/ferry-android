@@ -1,6 +1,12 @@
 package fi.ferry.messenger.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.ColumnScope
@@ -52,6 +58,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -327,11 +334,18 @@ fun AccountsSheet(dismiss: () -> Unit, addAccount: () -> Unit, open: (String) ->
         if (i + by !in order.indices) return
         order = order.toMutableList().apply { add(i + by, removeAt(i)) }
     }
-    ModalBottomSheet(dismiss, containerColor = MaterialTheme.colorScheme.background) {
-        Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
-            Text("Instagram accounts", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(12.dp))
-            if (AppModel.accounts.isEmpty()) Text("No accounts yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val context = LocalContext.current
+    // "Ferry Messenger 1.7": the build's own version name.
+    val version = remember { context.packageManager.getPackageInfo(context.packageName, 0).versionName?.let { "Ferry Messenger $it" } }
+    // Fully open, as iOS's sheet: the version line at the end is in view.
+    ModalBottomSheet(dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Grouped.page) { CompositionLocalProvider(LocalMarkRing provides Grouped.card) {
+        Column(Modifier.navigationBarsPadding().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+            Text("Accounts", Modifier.padding(horizontal = 4.dp).semantics { heading() }, style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(16.dp))
+            GroupedSection("Instagram accounts", if (accounts.size > 1) "Each chat stays tied to the account it belongs to. Touch and hold an account, then drag to reorder the scope bar."
+                else "Each chat stays tied to the account it belongs to.") {
+            if (AppModel.accounts.isEmpty()) Text("No accounts yet", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             for (login in order.mapNotNull { id -> accounts.firstOrNull { it.id == id } }) key(login.id) {
                 val id = login.id
                 val identity = AppModel.identities[login.id]
@@ -363,75 +377,107 @@ fun AccountsSheet(dismiss: () -> Unit, addAccount: () -> Unit, open: (String) ->
                     Modifier.zIndex(if (lifted) 1f else 0f).onSizeChanged { heights[id] = it.height }
                         .graphicsLayer { translationY = if (lifted) dragY else 0f }
                         .then(if (lifted) Modifier.shadow(8.dp, RoundedCornerShape(12.dp)) else Modifier)
-                        .fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.background)
+                        .fillMaxWidth().background(Grouped.card)
                         // The drag inside the click sees the touch first and takes a long press's release: letting go opens nothing.
-                        .clickable { open(login.id) }.then(reorder).padding(vertical = 8.dp)
+                        .clickable { open(login.id) }.then(reorder).padding(horizontal = 16.dp, vertical = 10.dp)
                         .semantics(mergeDescendants = true) {},
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box { AccountAvatar(identity, login.profile?.avatar, name, 44.dp); if (identity != null) Box(Modifier.align(Alignment.BottomEnd)) { AccountMark(identity, 18.dp, ring = 2.dp) } }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    AccountAvatar(identity, login.profile?.avatar, name, 44.dp, mark = true)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                         login.profile?.username?.let { Text("@$it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         if (login.isProfessional) Text("Professional · Primary and General", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                         HealthLabel(health)
                     }
-                    if (health == Health.NeedsLogin) TextButton({ relogin(login.id) }) { Text("Log in") }
-                    else Icon(Icons.chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (health == Health.NeedsLogin) Button({ relogin(login.id) }) { Text("Log in") }
+                    else Icon(Icons.chevron, null, tint = MaterialTheme.colorScheme.outline)
                 }
+                RowDivider(start = 16.dp + 52.dp + 14.dp)
             }
-            Spacer(Modifier.height(12.dp))
-            Button(addAccount, Modifier.fillMaxWidth()) { Text("Add Instagram account") }
-            Text(if (accounts.size > 1) "Each chat stays tied to the account it belongs to. Touch and hold an account, then drag to reorder the scope bar."
-                else "Each chat stays tied to the account it belongs to.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ActionRow("Add Instagram account", Icons.add, onClick = addAccount)
+            }
+            version?.let {
+                Text(it, Modifier.padding(start = 16.dp, top = 20.dp), style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (AppModel.accounts.isNotEmpty() && !AppModel.demo) BackgroundRow()
         }
-    }
+    } }
 }
 
-/** A2: one account. Its identity (saved as it's edited, when it can be), its state, and Remove Account. */
+/**
+ * A2 (DESIGN A2, iOS `AccountDetailView`): one account on a grouped page: its row, the identity editor (saved as it's
+ * edited, when it can be), its state and since when, the note on encrypted chats, and Remove Account.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountScreen(id: String, back: () -> Unit, relogin: (String) -> Unit) {
     BackHandler(onBack = back)
     val login = AppModel.accounts.firstOrNull { it.id == id }
     var draft by remember(id) { mutableStateOf(AppModel.identities[id]) }
     var confirmRemove by remember { mutableStateOf(false) }
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(back) { Icon(Icons.back, "Back") }
-                Text(draft?.name ?: login?.displayName ?: "Account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            }
-            if (login == null) {
-                Empty(Icons.person, "Account removed", "Its chats left Ferry Messenger on this phone.")
-                return@Column
-            }
-            val identity = draft
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AccountAvatar(identity, login.profile?.avatar, identity?.name ?: login.displayName, 56.dp)
-                    Column(Modifier.padding(start = 12.dp)) {
-                        login.profile?.username?.let { Text("@$it", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) }
-                        HealthLabel(login.health)
+    Scaffold(
+        containerColor = Grouped.page,
+        topBar = {
+            TopAppBar(
+                title = { Text(draft?.name ?: login?.displayName ?: "Account", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                navigationIcon = { IconButton(back) { Icon(Icons.back, "Back") } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Grouped.page, scrolledContainerColor = Grouped.page),
+            )
+        },
+    ) { padding ->
+        if (login == null) {
+            Box(Modifier.padding(padding)) { Empty(Icons.person, "Account removed", "Its chats left Ferry Messenger on this phone.") }
+            return@Scaffold
+        }
+        val identity = draft
+        CompositionLocalProvider(LocalMarkRing provides Grouped.card) {
+            Column(
+                Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize().verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                GroupedSection {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp).semantics(mergeDescendants = true) {},
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        AccountAvatar(identity, login.profile?.avatar, identity?.name ?: login.displayName, 56.dp, mark = true)
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(login.profile?.username?.let { "@$it" } ?: identity?.name ?: login.displayName, style = MaterialTheme.typography.bodyLarge)
+                            HealthLabel(login.health)
+                        }
                     }
                 }
                 if (identity != null) IdentityEditor(id, identity, login) { edited ->
                     draft = edited
                     if (AccountIdentity.problems(edited, id, AppModel.identities).isEmpty()) AppModel.setIdentity(id, edited)
                 }
-                HorizontalDivider()
-                Text("Status", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("State: ${login.health.label}", style = MaterialTheme.typography.bodyMedium)
-                (login.health as? Health.Error)?.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = Status.error) }
-                if (login.health == Health.NeedsLogin) Button({ relogin(id) }) { Text("Log in again") }
-                Text("Instagram's end-to-end encrypted chats can't be shown here. Open them in Instagram.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                HorizontalDivider()
-                TextButton({ confirmRemove = true }) { Text("Remove Account…", color = Status.error) }
+                GroupedSection("Status") {
+                    ValueRow("State", login.health.label)
+                    login.state?.timestamp?.let { since ->
+                        RowDivider()
+                        ValueRow("Since", sinceLabel((since * 1000).toLong()))
+                    }
+                    (login.health as? Health.Error)?.message?.let {
+                        RowDivider()
+                        Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (login.health == Health.NeedsLogin) {
+                        RowDivider()
+                        ActionRow("Log in again") { relogin(id) }
+                    }
+                }
+                GroupedSection {
+                    Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(Icons.lock, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Instagram's end-to-end encrypted chats can't be shown here. Open them in Instagram.",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                GroupedSection { ActionRow("Remove Account…", color = Status.error) { confirmRemove = true } }
             }
         }
     }
@@ -446,6 +492,23 @@ fun AccountScreen(id: String, back: () -> Unit, relogin: (String) -> Unit) {
             dismissButton = { TextButton({ confirmRemove = false }) { Text("Cancel") } },
         )
     }
+}
+
+/** A label and its value on one row of a card (iOS's `LabeledContent`). */
+@Composable
+private fun ValueRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp).semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+        Text(value, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** "now", "5 minutes ago", "yesterday": iOS's relative date, named. */
+private fun sinceLabel(ms: Long): String {
+    val now = System.currentTimeMillis()
+    if (now - ms < 60_000) return "now"
+    return android.text.format.DateUtils.getRelativeTimeSpanString(ms, now, android.text.format.DateUtils.MINUTE_IN_MILLIS).toString()
 }
 
 /** A3: a signed-out account. Why, that nothing's lost, and logging in again (the web view, as that account). */
@@ -546,7 +609,7 @@ fun BackgroundRow() {
         exempt = power.isIgnoringBatteryOptimizations(context.packageName)
     }
     if (exempt) return
-    Column(Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 16.dp).clip(RoundedCornerShape(20.dp)).background(Grouped.card).padding(16.dp)) {
         Text("Android may stop Ferry in the background", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         Text("Then new messages wait until you open it. Let Ferry run in the background to keep them coming.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
