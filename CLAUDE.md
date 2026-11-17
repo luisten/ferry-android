@@ -50,7 +50,7 @@ user-visible change adds a line under Unreleased.
 . docs/local/env.sh        # gitignored; sets JAVA_HOME (~/Library/Android/jdk/jdk-21.0.13+9/Contents/Home), ANDROID_HOME (~/Library/Android/sdk)
                            # and PATH (Homebrew's Go 1.27.3 in /opt/homebrew/bin, the JDK, platform-tools, emulator)
 ./gradlew assembleDebug                         # runs build-engine.sh (libigcore.so, arm64-v8a), then the APK
-./gradlew testDebugUnitTest                     # the model's and the screens' pure logic, on the JVM, 218, ~5 s (results: app/build/test-results)
+./gradlew testDebugUnitTest                     # the model's and the screens' pure logic, on the JVM, 219, ~5 s (results: app/build/test-results)
 ./gradlew assembleRelease                       # app/build/outputs/apk/release/app-release.apk; lintVitalRelease runs with it
 B=$ANDROID_HOME/build-tools/36.0.0; A=app/build/outputs/apk/release/app-release.apk
 $B/apksigner verify --print-certs $A            # one signer, CN=Ferry Messenger; its SHA-256 is the one in docs/INSTALL.md
@@ -128,7 +128,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   reaction and its log entry in Jonas Berg's chat, 10 s in), `clipboard` (two made-up JPEGs on the clipboard), `--ei
   group_older n` (the group pages in from its newest five, then n pages of 20), `--ei group_extra n` (n more unread in
   the group), `signed_out`, `naming`, `connecting` (O4 for Tamo, then O5; with `signed_out`, O4 failed for Kivo). Always there: Ada Lind (days, links, emoji, a tombstone, a failed message),
-  Ravi Shah (a reaction log entry), Elena's photo without a URL. The demo's `markRead` does nothing and its sends fail
+  Ravi Shah (a reaction log entry), Elena's photo without a URL, Mira Holt's two videos (ours, and a loaded reel with a
+  long caption) that open the player on a 6 s clip of debug builds' own (`src/debug/assets`, cached at each demo launch, A76). The demo's `markRead` does nothing and its sends fail
   after 0.6 s (through the send line, so the order shows).
 - **Live checks use the two dummies only** (stand-ins `tamoveska` personal, `kivostudio` professional; real names only
   in the iOS repo's gitignored `docs/local/test-accounts.md`). Every login, launch, send and "Seen" is an Instagram
@@ -271,7 +272,9 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   failed download reads the thread again (`IGReadChat`), since links expire. A card registers its tap with the
   message's own gesture handler (`LocalTap`), so a long press on a photo still opens the menu; every card is clipped with
   the bubble's shape (`bubbleShape`: 20, 6 where joined; an opened set's cards first/middle/last, 2 dp apart); a card with its own tap
-  (each one of an opened set) takes the message's long press too (`TapTarget.hold`). GIFs play three times
+  (each one of an opened set) takes the message's long press too (`TapTarget.hold`). The video player is iOS's
+  `PlayerView` (`VideoView`, A74, A75): close and mute on top, a share's author, caption and Open in Instagram, "Shared by
+  … · time" with the account's tag, the scrubber; mute is the player's volume, off at each opening. GIFs play three times
   once per launch, stickers loop, neither in a request or with animations off (Android 9+, `AnimatedImageDrawable`).
 - **Sending media** (`Outgoing`): photos as JPEG (at most 2048 px, quality 85/70/50 until under 8,000,000 bytes; no
   metadata is copied); animated GIFs and WebPs as they are with their metadata cut out (`MediaClean`: no comments,

@@ -58,6 +58,9 @@ The first version for friends: what the iPhone app has up to its 1.7.
 - Tap someone's picture in a group chat, or a member in Chat Info, to see a bigger picture, their name and @handle, and
   open their Instagram profile.
 - Share a photo from the full-screen viewer. Photos and videos sent together have Share All: touch and hold them.
+- The video player looks and works as on the iPhone: close and sound on/off at the top, a thin bar to skip through, and
+  at the bottom who posted a shared reel (with Open in Instagram), its caption (tap it for the rest), and who shared it
+  and when, with your account's tag. Swipe down or up to go back to the chat.
 - Swipe a chat left to archive it, or to bring it back from Archived.
 - Pull down the chat list to reconnect an account that couldn't connect.
 - Touch and hold an account in Accounts, then drag it, to change their order.
