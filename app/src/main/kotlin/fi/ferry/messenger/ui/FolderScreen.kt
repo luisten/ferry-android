@@ -103,7 +103,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.rows(rooms: List<Room
     items(rooms, key = { it.id }) { room ->
         ArchiveActions(room, { open(room.id) }) { ChatRow(room, showsMark, times, it) }
         if (Inbox.isRequest(room)) RequestButtons(room)
-        HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        HorizontalDivider(Modifier.padding(start = 86.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 

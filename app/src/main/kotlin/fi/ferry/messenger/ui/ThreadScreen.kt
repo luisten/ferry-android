@@ -1103,7 +1103,7 @@ private fun TypingBubble(modifier: Modifier) {
     Box(modifier.fillMaxWidth()) {
         Text("•••", Modifier.background(Bubbles.incoming, CircleShape).padding(horizontal = 14.dp, vertical = 8.dp)
             .clearAndSetSemantics { contentDescription = "Typing" },
-            style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, fontStyle = FontStyle.Normal)
+            style = MaterialTheme.typography.titleMedium, color = Bubbles.timeOnIncoming, fontStyle = FontStyle.Normal)
     }
 }
 

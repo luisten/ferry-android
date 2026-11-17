@@ -169,7 +169,7 @@ fun InboxScreen(
                     if (AppModel.initialSyncDone) {
                         items(list, key = { it.id }) { room ->
                             ArchiveActions(room, { openThread(room.id) }) { ChatRow(room, showsMark = scope == Inbox.Scope.All && multiAccount, times, it) }
-                            HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            HorizontalDivider(Modifier.padding(start = 86.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     } else if (!unreachable) {
                         items(8) { PlaceholderRow() }
