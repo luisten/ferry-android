@@ -2,4 +2,6 @@
 <resources>
     <!-- iOS's LaunchBackground: the icon's sea at its midpoint (light), black (dark). -->
     <color name="launch">#12536D</color>
+    <!-- The window behind the app once it's up: the page's own colour (Theme.Ferry.App). -->
+    <color name="page">#FFFFFF</color>
 </resources>

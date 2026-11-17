@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark: so no white window shows before the first dark frame. -->
+    <style name="Theme.Ferry.App" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/page</item>
+    </style>
+    <style name="Theme.Ferry" parent="Theme.Ferry.App">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+</resources>

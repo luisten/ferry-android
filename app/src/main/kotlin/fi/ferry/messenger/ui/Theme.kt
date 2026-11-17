@@ -59,8 +59,8 @@ fun FerryTheme(content: @Composable () -> Unit) {
 /** Status glyphs and text (always with a glyph, never colour alone): 5+ on white and on #1C1C1E. */
 object Status {
     val warn: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFFFF9F0A) else Color(0xFFB25000)
-    val ok: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF30D158) else Color(0xFF1E7B34)
-    val error: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFFFF453A) else Color(0xFFC4251C)
+    val ok: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFF30D158) else Color(0xFF1F7A35)
+    val error: Color @Composable @ReadOnlyComposable get() = if (isSystemInDarkTheme()) Color(0xFFFF453A) else Color(0xFFD70015)
 }
 
 /**

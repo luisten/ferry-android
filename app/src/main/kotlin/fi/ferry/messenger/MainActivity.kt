@@ -38,6 +38,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        setTheme(R.style.Theme_Ferry_App) // from the launch theme (the manifest's) to the plain one, before the first frame
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Debug builds: `--ez demo true` shows made-up data only, and nothing connects (`Demo`); `--es request_room <room>`

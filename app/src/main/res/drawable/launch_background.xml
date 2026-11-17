@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The window before Compose's first frame, where Android 12's launch screen isn't (API 26-30): the launch colour and the
+     mark, whose artboard is iOS's LaunchMark 120 dp (the vector's 108 dp holds the 1024 artboard in 72 dp: 180 dp). -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/launch" />
+    <item
+        android:width="180dp"
+        android:height="180dp"
+        android:gravity="center"
+        android:drawable="@drawable/ic_launch_mark" />
+</layer-list>
