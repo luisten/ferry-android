@@ -1,0 +1,134 @@
+# CI: lint, the unit tests and a debug build (the engine included), on GitHub's own runners.
+# Nothing here touches Instagram and no secrets are used: the only token is the read-only GITHUB_TOKEN of
+# `permissions` below, and the release key never leaves the Mac that signs releases. Actions are pinned by commit
+# SHA; downloaded tools by version and SHA-256, bumped by hand (the same pins as the iOS repo's CI).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash # -eo pipefail
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install shellcheck and actionlint (pinned, checksum-verified)
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHELLCHECK_SHA256: b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6 # linux.x86_64.tar.gz
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 # linux_amd64.tar.gz
+        run: |
+          mkdir -p "$RUNNER_TEMP/dl" "$RUNNER_TEMP/bin"
+          cd "$RUNNER_TEMP/dl"
+          curl -fsSLo shellcheck.tar.gz \
+            "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.x86_64.tar.gz"
+          curl -fsSLo actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$SHELLCHECK_SHA256" shellcheck.tar.gz "$ACTIONLINT_SHA256" actionlint.tar.gz | sha256sum --strict -c -
+          tar -xzf shellcheck.tar.gz -C "$RUNNER_TEMP/bin" --strip-components=1 "shellcheck-$SHELLCHECK_VERSION/shellcheck"
+          tar -xzf actionlint.tar.gz -C "$RUNNER_TEMP/bin" actionlint
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+
+      - name: shellcheck (every tracked *.sh)
+        run: git ls-files -z '*.sh' | xargs -0 -r shellcheck
+
+      - name: actionlint (workflows, and shellcheck on their scripts)
+        run: actionlint
+
+      - name: No secrets, keystores or home paths in tracked files
+        run: |
+          status=0
+          check() { # <what> <extended regex>
+            local rc=0
+            git grep -nE "$2" || rc=$?
+            case $rc in
+              0) echo "::error::$1 in tracked files (above)"; status=1 ;;
+              1) echo "ok - no $1" ;;
+              *) echo "::error::git grep failed ($rc)"; status=1 ;;
+            esac
+          }
+          # The scans of CLAUDE.md "Commands": Instagram session cookies, home directory paths.
+          check "Instagram session cookies" '"sessionid"[[:space:]]*:[[:space:]]*"[^"]{12,}'
+          check "home directory paths" '/(Users|home)/[A-Za-z0-9._-]+'
+          if git ls-files | grep -E '\.(jks|keystore)$|(^|/)keystore\.properties$|(^|/)go\.work$'; then
+            echo "::error::a keystore, its properties or a go.work is tracked (above)"; status=1
+          else
+            echo "ok - no keystore or go.work"
+          fi
+          exit "$status"
+
+  app:
+    name: Unit tests and debug build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # JDK 21 is on the image (Temurin); the app is built with 21 locally too.
+      - name: Use the image's JDK 21
+        run: |
+          [ -d "${JAVA_HOME_21_X64:-}" ] || { echo "::error::no JDK 21 on this image"; exit 1; }
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >>"$GITHUB_ENV"
+          "$JAVA_HOME_21_X64/bin/java" -version
+
+      # The engine is Go: 1.27.3, pinned and checksummed (go.dev's published SHA-256 for linux-amd64), as
+      # build-engine.sh requires. Gradle runs that script before the build.
+      - name: Install Go
+        env:
+          GO_VERSION: go1.27.3
+          GO_SHA256: 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 # linux-amd64.tar.gz
+        run: |
+          mkdir -p "$RUNNER_TEMP/go-dl"
+          curl -fsSLo "$RUNNER_TEMP/go-dl/go.tar.gz" "https://go.dev/dl/$GO_VERSION.linux-amd64.tar.gz"
+          printf '%s  %s\n' "$GO_SHA256" "$RUNNER_TEMP/go-dl/go.tar.gz" | sha256sum --strict -c -
+          tar -xzf "$RUNNER_TEMP/go-dl/go.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >>"$GITHUB_PATH"
+
+      # The versions the app is built with (app/build.gradle.kts, build-engine.sh). The image's SDK has its licences
+      # accepted by GitHub; without them sdkmanager stops here rather than this workflow accepting anything.
+      - name: Android SDK packages
+        env:
+          NDK_VERSION: 30.0.16248370
+        run: |
+          sdkmanager=$(find "$ANDROID_HOME/cmdline-tools" -path '*/bin/sdkmanager' | sort | tail -1)
+          "$sdkmanager" --install "platforms;android-37.0" "build-tools;36.0.0" "ndk;$NDK_VERSION" </dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >>"$GITHUB_ENV"
+
+      # Dependencies are checked against gradle/verification-metadata.xml; the wrapper against its SHA-256.
+      - name: Unit tests and debug build
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+
+      - name: Summary
+        if: always()
+        run: |
+          python3 - <<'PY' >>"$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as E
+          t = f = 0
+          for p in glob.glob('app/build/test-results/testDebugUnitTest/*.xml'):
+              r = E.parse(p).getroot(); t += int(r.get('tests')); f += int(r.get('failures')) + int(r.get('errors'))
+          print(f'Unit tests: {t} run, {f} failed')
+          PY
+          ls -l app/build/outputs/apk/debug/app-debug.apk app/build/engine/jniLibs/arm64-v8a/libigcore.so >>"$GITHUB_STEP_SUMMARY" 2>&1 || true

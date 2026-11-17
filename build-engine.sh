@@ -10,6 +10,7 @@ want=go1.27.3
 have=$(GOTOOLCHAIN=local go env GOVERSION) # local: an older Go would otherwise fetch the toolchain line's by itself
 [ "$have" = "$want" ] || { echo "build-engine.sh: need $want on PATH, found $have" >&2; exit 1; }
 ndk=${ANDROID_NDK_HOME:-$HOME/Library/Android/sdk/ndk/30.0.16248370}
+case $(uname -s) in Linux) host=linux-x86_64 ;; *) host=darwin-x86_64 ;; esac # CI builds on Linux
 api=26 # minSdk, Android 8.0
 
 out=app/build/engine/jniLibs/arm64-v8a
@@ -17,7 +18,7 @@ mkdir -p "$out"
 # The SONAME is what the NDK's own toolchain would set (Go's c-shared mode sets none). NDK r30 aligns LOAD segments
 # to 16 KB, which Android 15+ phones with 16 KB pages require.
 CGO_ENABLED=1 GOOS=android GOARCH=arm64 GOTOOLCHAIN=local \
-  CC="$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android$api-clang" \
+  CC="$ndk/toolchains/llvm/prebuilt/$host/bin/aarch64-linux-android$api-clang" \
   go build -trimpath -ldflags="-s -w -extldflags=-Wl,-soname,libigcore.so" -buildmode=c-shared \
   -o "$out/libigcore.so" github.com/luisten/ferry-messenger/core/cmd/igcore
 rm "$out/libigcore.h" # for C callers; Kotlin goes through the JNI bridge
