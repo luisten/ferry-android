@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -120,11 +121,11 @@ private fun RequestButtons(room: Room) {
     if (confirming) DeleteRequestDialog(room, { confirming = false }) { AppModel.deleteRequest(room) }
 }
 
-/** A small capsule button (iOS's `.controlSize(.small)`): 32 dp, a 48 dp target by Compose's own touch slop. Filled in the primary colour, else outlined in `color`. */
+/** A small capsule button (iOS's `.controlSize(.small)`): at least 32 dp, a 48 dp target by Compose's own touch slop. Filled in the primary colour, else outlined in `color`. */
 @Composable
 fun SmallButton(text: String, filled: Boolean, color: Color = MaterialTheme.colorScheme.onSurface, onClick: () -> Unit) {
-    val modifier = Modifier.height(32.dp)
-    val padding = PaddingValues(horizontal = 14.dp)
+    val modifier = Modifier.heightIn(min = 32.dp)
+    val padding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
     val label: @Composable RowScope.() -> Unit = { Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold) }
     if (filled) Button(onClick, modifier, contentPadding = padding, content = label)
     else OutlinedButton(onClick, modifier, contentPadding = padding, border = BorderStroke(1.dp, color.copy(alpha = 0.6f)),

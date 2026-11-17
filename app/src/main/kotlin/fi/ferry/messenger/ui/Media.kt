@@ -68,6 +68,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -80,6 +82,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -98,6 +101,7 @@ import fi.ferry.messenger.model.MessageKind.ShareState
 import fi.ferry.messenger.model.MessageKind.ShareType
 import fi.ferry.messenger.model.Room
 import fi.ferry.messenger.model.ShareCaption
+import fi.ferry.messenger.model.Timeline.GroupPosition
 import java.io.File
 import kotlin.concurrent.thread
 import kotlinx.coroutines.Dispatchers
@@ -168,18 +172,18 @@ private fun fetch(url: String, mimetype: String?, room: Room, failed: () -> Unit
  * label, a post's caption, a pile's count, a voice note's length), never over them (A35).
  */
 @Composable
-fun MediaBubble(message: Message, kind: MessageKind, time: String?, placeholder: @Composable (time: String?) -> Unit) {
+fun MediaBubble(message: Message, kind: MessageKind, time: String?, shape: Shape, placeholder: @Composable (time: String?) -> Unit) {
     val media = MediaInfo(message.content)
     // Instagram reports no upload progress: a spinner until it answers.
     val uploading = message.isLocalEcho && message.status == Message.Status.Sending
     when {
         media.album.size >= 2 -> AlbumPile(message, media, time)
-        kind == MessageKind.Voice || kind == MessageKind.Audio -> if (media.url != null) VoiceBubble(message, media, time) else placeholder(time)
+        kind == MessageKind.Voice || kind == MessageKind.Audio -> if (media.url != null) VoiceBubble(message, media, time, shape) else placeholder(time)
         (kind == MessageKind.Image || kind == MessageKind.Gif || kind == MessageKind.Sticker) && media.url != null ->
-            Timed(time) { PhotoCard(message.id, media, sticker = kind == MessageKind.Sticker, tapHere = true, uploading = uploading) }
-        kind == MessageKind.Video && media.url != null -> Timed(time) { VideoCard(message, media, share = null, tapHere = true, uploading = uploading) }
-        kind is MessageKind.Share && kind.type == ShareType.POST && media.url != null -> PostCard(message, media, time)
-        kind is MessageKind.Share && (kind.type == ShareType.REEL || kind.type == ShareType.STORY) -> Timed(time) { VideoCard(message, media, kind, tapHere = true) }
+            Timed(time) { PhotoCard(message.id, media, sticker = kind == MessageKind.Sticker, tapHere = true, shape = shape, uploading = uploading) }
+        kind == MessageKind.Video && media.url != null -> Timed(time) { VideoCard(message, media, share = null, tapHere = true, shape = shape, uploading = uploading) }
+        kind is MessageKind.Share && kind.type == ShareType.POST && media.url != null -> PostCard(message, media, time, shape)
+        kind is MessageKind.Share && (kind.type == ShareType.REEL || kind.type == ShareType.STORY) -> Timed(time) { VideoCard(message, media, kind, tapHere = true, shape = shape) }
         else -> placeholder(time) // view once, files, other shares, the mailbox's copies before the thread is read
     }
 }
@@ -223,7 +227,7 @@ private val playedGIFs = mutableSetOf<String>()
  * launch, then rests; a sticker loops. Neither plays in a request or with animations off. Tap: full screen.
  */
 @Composable
-private fun PhotoCard(id: String, media: MediaInfo, sticker: Boolean, tapHere: Boolean, uploading: Boolean = false, modifier: Modifier = Modifier) {
+private fun PhotoCard(id: String, media: MediaInfo, sticker: Boolean, tapHere: Boolean, shape: Shape, uploading: Boolean = false, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val ctx = LocalMedia.current
     val url = media.url ?: return
@@ -240,7 +244,7 @@ private fun PhotoCard(id: String, media: MediaInfo, sticker: Boolean, tapHere: B
     val still = Pictures.load(if (media.isAnimated) media.thumbnailURL ?: url else url, px)
     Box(
         // A sticker has no card, once it's there: till then the same grey as a photo's.
-        modifier.size(w, h).clip(RoundedCornerShape(if (sticker && still != null) 0.dp else 18.dp))
+        modifier.size(w, h).clip(if (sticker && still != null) RectangleShape else shape)
             .background(if (sticker && still != null) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant)
             .then(if (tapHere) Modifier else Modifier.ownTap(open))
             .semantics { contentDescription = if (sticker) "Sticker" else if (media.isAnimated) "GIF" else "Photo" },
@@ -301,8 +305,9 @@ private fun Overlay(progress: Float?, failed: Boolean) {
 
 @Composable
 private fun PlayGlyph() {
-    Box(Modifier.size(44.dp).background(Color.Black.copy(alpha = 0.45f), CircleShape), contentAlignment = Alignment.Center) {
-        Icon(Icons.play, null, Modifier.size(26.dp), tint = Color.White)
+    // iOS's video card, GIF play button included: 56 on black at 65%.
+    Box(Modifier.size(56.dp).background(Color.Black.copy(alpha = 0.65f), CircleShape), contentAlignment = Alignment.Center) {
+        Icon(Icons.play, null, Modifier.size(30.dp), tint = Color.White)
     }
 }
 
@@ -316,10 +321,12 @@ private fun AlbumPile(message: Message, media: MediaInfo, time: String?) {
     val items = media.album.map(::MediaInfo)
     if (open) {
         OnTap { }
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Stacked like a run of bubbles (iOS): first, middle and last corners, 2 dp apart.
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items.forEachIndexed { i, item ->
+                val shape = bubbleShape(if (i == 0) GroupPosition.FIRST else if (i == items.lastIndex) GroupPosition.LAST else GroupPosition.MIDDLE, message.isOwn)
                 Timed(time.takeIf { i == items.lastIndex }) {
-                    if (item.isVideo) VideoCard(message, item, share = null, tapHere = false) else PhotoCard(message.id, item, sticker = false, tapHere = false)
+                    if (item.isVideo) VideoCard(message, item, share = null, tapHere = false, shape = shape) else PhotoCard(message.id, item, sticker = false, tapHere = false, shape = shape)
                 }
             }
             TextButton({ open = false }) { Text("Show less") }
@@ -332,7 +339,7 @@ private fun AlbumPile(message: Message, media: MediaInfo, time: String?) {
     Box(Modifier.padding(8.dp).semantics { contentDescription = "${media.albumLabel}, double tap to show them" }) {
         val angles = listOf(0f, -3f, 3f, -6f, 6f)
         items.take(5).withIndex().reversed().forEach { (i, item) ->
-            Box(Modifier.size(w, h).rotate(angles[i]).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+            Box(Modifier.size(w, h).rotate(angles[i]).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
                 Pictures.load(item.previewURL, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
             }
         }
@@ -356,7 +363,7 @@ private fun AlbumPile(message: Message, media: MediaInfo, time: String?) {
  * 9:16 and 16:9. Shares start as "Load video" (a read: the engine fetches the reel or story), then open as if tapped.
  */
 @Composable
-private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Share?, tapHere: Boolean, uploading: Boolean = false) {
+private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Share?, tapHere: Boolean, shape: Shape, uploading: Boolean = false) {
     val ctx = LocalMedia.current
     val caption = ShareCaption.of(message.content)
     val unresolved = share?.state == ShareState.UNRESOLVED
@@ -406,15 +413,18 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
     }
     if (tapHere) OnTap(tap)
     val px = with(LocalDensity.current) { maxOf(w, h).roundToPx() }
-    Box(Modifier.size(w, h).clip(RoundedCornerShape(18.dp)).background(Color.Black).then(if (tapHere) Modifier else Modifier.ownTap(tap))) {
+    Box(Modifier.size(w, h).clip(shape).background(Color(0xFF292929)).then(if (tapHere) Modifier else Modifier.ownTap(tap))) {
         Pictures.load(media.thumbnailURL, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         if (share != null) {
-            val author = caption.author?.let { if (share.type == ShareType.STORY) "Story · @$it" else "@$it" } ?: share.type.label
-            Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.6f), Color.Transparent)))
-                .padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.of(share.type.glyph), null, Modifier.size(16.dp), tint = Color.White)
-                Text(author, Modifier.padding(start = 6.dp), color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
+            // iOS: "@author" ("Story · @author"), a reel's badge at the end, on a fade from the top.
+            val author = caption.author?.let { if (share.type == ShareType.STORY) "Story · @$it" else "@$it" } ?: "Story".takeIf { share.type == ShareType.STORY }
+            Row(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent)))
+                .padding(start = 9.dp, end = 9.dp, top = 9.dp, bottom = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(author.orEmpty(), Modifier.weight(1f), color = Color.White, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (share.type == ShareType.REEL) Box(Modifier.size(26.dp).background(Color.Black.copy(alpha = 0.65f), CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.reels, null, Modifier.size(15.dp), tint = Color.White)
+                }
             }
         }
         caption.caption?.takeIf { it.isNotBlank() }?.let {
@@ -436,7 +446,7 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
                         style = MaterialTheme.typography.labelMedium)
                 }
                 failed != null -> Pill(Icons.retry, "Try again")
-                unresolved -> Pill(Icons.play, if (share?.type == ShareType.STORY) "Load story" else "Load video")
+                unresolved -> Pill(Icons.download, if (share?.type == ShareType.STORY) "Load story" else "Load video")
                 uploading -> Spinner()
                 progress != null -> Overlay(progress, failed = false)
                 else -> PlayGlyph()
@@ -447,7 +457,7 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
 
 @Composable
 private fun Pill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
-    Row(Modifier.background(Color.Black.copy(alpha = 0.55f), CircleShape).padding(horizontal = 14.dp, vertical = 8.dp),
+    Row(Modifier.heightIn(min = 36.dp).background(Color.Black.copy(alpha = 0.65f), CircleShape).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(18.dp), tint = Color.White)
         Text(label, Modifier.padding(start = 6.dp), color = Color.White, style = MaterialTheme.typography.labelLarge)
@@ -456,7 +466,7 @@ private fun Pill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: S
 
 /** DESIGN §6.7: a shared post, 240 wide: who posted it, its picture (between 16:9 and 4:5) and two lines of caption. */
 @Composable
-private fun PostCard(message: Message, media: MediaInfo, time: String?) {
+private fun PostCard(message: Message, media: MediaInfo, time: String?, shape: Shape) {
     val ctx = LocalMedia.current
     val caption = ShareCaption.of(message.content)
     val url = media.url ?: return
@@ -464,11 +474,13 @@ private fun PostCard(message: Message, media: MediaInfo, time: String?) {
     OnTap { if (ctx != null) fetch(url, media.mimetype, ctx.room, { failed = true }) { failed = false; ctx.open(Viewer.Photo(it, animated = false)) } }
     val ratio = ((media.height ?: 1.0) / (media.width ?: 1.0)).coerceIn(0.5625, 1.25)
     val px = with(LocalDensity.current) { 240.dp.roundToPx() }
-    Column(Modifier.width(240.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.of(fi.ferry.messenger.model.Glyph.POST), null, Modifier.size(16.dp))
-            Text(caption.author?.let { "@$it" } ?: "Post", Modifier.padding(start = 6.dp), style = MaterialTheme.typography.labelLarge,
+    // iOS: the bubble's colour (the account's on ours) and its text colour; the author, then the post's glyph at the end.
+    val (fill, ink) = cardColors(message)
+    Column(Modifier.width(240.dp).clip(shape).background(fill)) {
+        Row(Modifier.heightIn(min = 36.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(caption.author?.let { "@$it" } ?: "Post", Modifier.weight(1f), color = ink, style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.of(fi.ferry.messenger.model.Glyph.POST), null, Modifier.padding(start = 8.dp).size(16.dp), tint = ink.copy(alpha = 0.7f))
         }
         Box(Modifier.fillMaxWidth().height((240 * ratio).toFloat().dp).background(Color.Black), contentAlignment = Alignment.Center) {
             Pictures.load(url, px)?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
@@ -478,7 +490,7 @@ private fun PostCard(message: Message, media: MediaInfo, time: String?) {
         caption.caption?.takeIf { it.isNotBlank() }?.let {
             // The time beside the caption, not over its end.
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(it, Modifier.weight(1f).padding(12.dp), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(it, Modifier.weight(1f).padding(12.dp), color = ink, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 time?.let { t -> CardTime(t, Modifier, spoken = true) }
             }
         }
@@ -490,13 +502,14 @@ private fun PostCard(message: Message, media: MediaInfo, time: String?) {
  * and while it plays the speed. Drag the bars to seek.
  */
 @Composable
-private fun VoiceBubble(message: Message, media: MediaInfo, time: String?) {
+private fun VoiceBubble(message: Message, media: MediaInfo, time: String?, shape: Shape) {
     val context = LocalContext.current
     val ctx = LocalMedia.current
     val own = message.isOwn
-    val identity = ctx?.room?.let { identityOf(it) }
-    val fill = if (own) identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground else Bubbles.incoming
-    val ink = if (own) Color.White else MaterialTheme.colorScheme.onBackground
+    val (fill, ink) = cardColors(message)
+    // iOS's play disc is solid: white with the account's colour on ours, the text colour with the page's on theirs.
+    val disc = if (own) Color.White else ink
+    val glyph = if (own) fill else MaterialTheme.colorScheme.background
     val url = media.url ?: return
     val duration = media.duration ?: 0L
     val loaded = VoicePlayer.current == message.id
@@ -516,15 +529,15 @@ private fun VoiceBubble(message: Message, media: MediaInfo, time: String?) {
     OnTap(toggle)
     val heights = remember(message.id) { voiceBars(message.id, BARS) }
     Row(
-        Modifier.width(240.dp).heightIn(min = 48.dp).background(fill, RoundedCornerShape(24.dp)).padding(horizontal = 8.dp, vertical = 8.dp)
+        Modifier.width(240.dp).heightIn(min = 48.dp).background(fill, shape).padding(horizontal = 8.dp, vertical = 8.dp)
             .semantics { contentDescription = "Voice message, ${clock(duration)}" },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(Modifier.size(32.dp).background(ink.copy(alpha = 0.18f), CircleShape).clickable(onClick = toggle), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(32.dp).background(disc, CircleShape).clickable(onClick = toggle), contentAlignment = Alignment.Center) {
             when {
-                MediaFiles.progress[url] != null -> CircularProgressIndicator(Modifier.size(18.dp), color = ink, strokeWidth = 2.dp)
-                failed -> Icon(Icons.retry, "Try again", Modifier.size(18.dp), tint = ink)
-                else -> Icon(if (playing) Icons.pause else Icons.play, if (playing) "Pause" else "Play", Modifier.size(20.dp), tint = ink)
+                MediaFiles.progress[url] != null -> CircularProgressIndicator(Modifier.size(18.dp), color = glyph, strokeWidth = 2.dp)
+                failed -> Icon(Icons.retry, "Try again", Modifier.size(18.dp), tint = glyph)
+                else -> Icon(if (playing) Icons.pause else Icons.play, if (playing) "Pause" else "Play", Modifier.size(20.dp), tint = glyph)
             }
         }
         val done = if (duration > 0) position.toFloat() / duration else 0f
@@ -553,6 +566,14 @@ private fun VoiceBubble(message: Message, media: MediaInfo, time: String?) {
                 .background(ink.copy(alpha = 0.18f)).padding(horizontal = 6.dp, vertical = 2.dp), color = ink, style = MaterialTheme.typography.labelSmall)
         }
     }
+}
+
+/** A card's bubble colour and the text colour on it: the account's fill and white on ours, the grey bubble and the page's text on theirs. */
+@Composable
+private fun cardColors(message: Message): Pair<Color, Color> {
+    val identity = LocalMedia.current?.room?.let { identityOf(it) }
+    return if (message.isOwn) (identity?.color?.fillColor ?: MaterialTheme.colorScheme.onBackground) to Color.White
+    else Bubbles.incoming to MaterialTheme.colorScheme.onBackground
 }
 
 private const val BARS = 26

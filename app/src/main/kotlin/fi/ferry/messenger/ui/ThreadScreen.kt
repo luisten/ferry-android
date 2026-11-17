@@ -408,7 +408,7 @@ private fun ThreadContent(roomID: String, back: () -> Unit, relogin: (String) ->
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             if (bar == Inbox.ThreadBar.SIGNED_OUT && login != null) {
-                RecoveryBar(identity?.name ?: login.displayName) { relogin(login.id) }
+                RecoveryBar(identity?.name ?: login.displayName, identity) { relogin(login.id) }
             } else if (bar == Inbox.ThreadBar.REQUEST) {
                 RequestBar(AppModel.contactHandle(room)?.let { "@$it" } ?: room.name, identity,
                     accept = { AppModel.accept(room) }, delete = { confirmingDelete = true }, replyInstead = { replyingInstead = true })
@@ -870,7 +870,7 @@ private fun BubbleBody(message: Message, shape: RoundedCornerShape, fill: Color,
         MessageKind.Text, MessageKind.Notice -> TextBubble(message.body, shape, fill, text, own, time.orEmpty())
         MessageKind.Link -> LinkBubble(message, shape, fill, text, time.orEmpty())
         // ponytail: a labelled card until A6 shows the media itself (photos, videos, voice, GIFs, shares).
-        else -> MediaBubble(message, kind, time) { MediaPlaceholder(kind, message, shape, fill, text, it) }
+        else -> MediaBubble(message, kind, time, shape) { MediaPlaceholder(kind, message, shape, fill, text, it) }
     }
 }
 
@@ -1004,7 +1004,7 @@ private fun MediaPlaceholder(kind: MessageKind, message: Message, shape: Rounded
 }
 
 /** DESIGN §6.1: radius 20; the corners on the sender's side shrink to 6 where the bubble joins its neighbour. */
-private fun bubbleShape(position: GroupPosition, own: Boolean): RoundedCornerShape {
+internal fun bubbleShape(position: GroupPosition, own: Boolean): RoundedCornerShape {
     val top = if (position == GroupPosition.MIDDLE || position == GroupPosition.LAST) 6.dp else 20.dp
     val bottom = if (position == GroupPosition.FIRST || position == GroupPosition.MIDDLE) 6.dp else 20.dp
     return if (own) RoundedCornerShape(topStart = 20.dp, topEnd = top, bottomEnd = bottom, bottomStart = 20.dp)

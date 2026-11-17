@@ -51,6 +51,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -566,11 +567,15 @@ fun ConnectionBanner(banner: Inbox.Banner, openAccounts: () -> Unit, relogin: (S
 
 /** T2's signed-out bar: in place of the composer while the chat's account is signed out. */
 @Composable
-fun RecoveryBar(name: String, login: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(24.dp))
-        .background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("$name is signed out. Log in again to send and receive messages.", style = MaterialTheme.typography.bodyMedium)
-        Button(login, Modifier.fillMaxWidth()) { Text("Log in again") }
+fun RecoveryBar(name: String, identity: AccountIdentity?, login: () -> Unit) {
+    // iOS: one row (the thread is tinted with the account's ink, the button's label is the page's colour).
+    Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(24.dp))
+        .background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(Icons.warning, null, Modifier.size(22.dp), tint = Status.warn)
+        Text("$name is signed out. Log in again to send and receive messages.", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Button(login, colors = ButtonDefaults.buttonColors(containerColor = identity?.color?.ink ?: MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.background)) { Text("Log in again", fontWeight = FontWeight.SemiBold) }
     }
 }
 

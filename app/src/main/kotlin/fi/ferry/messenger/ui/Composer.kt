@@ -400,7 +400,7 @@ fun Composer(
                 }
             }
             if (count == 0 && items.isEmpty() && sendVoice != null) {
-                MicButton(sendVoice)
+                MicButton(fill, sendVoice)
             } else if (count > 0 || items.isNotEmpty()) {
                 val enabled = count <= Timeline.MAX_TEXT_LENGTH && (mode == ComposerMode.Editing || items.all { it.ready != null })
                 IconButton(send, Modifier.size(40.dp), enabled = enabled) {
@@ -420,7 +420,7 @@ fun Composer(
  * note is a second long. The first press asks for the microphone.
  */
 @Composable
-private fun MicButton(send: (Attachment) -> Unit) {
+private fun MicButton(fill: Color, send: (Attachment) -> Unit) {
     val context = LocalContext.current
     val sending = VoiceRecorder.recording || VoiceRecorder.review != null
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -456,9 +456,14 @@ private fun MicButton(send: (Attachment) -> Unit) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (sending) {
-            Box(Modifier.size(32.dp).background(MaterialTheme.colorScheme.onBackground, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.send, "Send voice message", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.background)
+        if (VoiceRecorder.recording && !VoiceRecorder.handsFree) {
+            // Held: the mic on the account's colour (iOS's `mic.fill` on a disc).
+            Box(Modifier.size(40.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.mic, null, Modifier.size(24.dp), tint = Color.White)
+            }
+        } else if (sending) {
+            Box(Modifier.size(32.dp).background(fill, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.send, "Send voice message", Modifier.size(20.dp), tint = Color.White)
             }
         } else {
             Icon(Icons.mic, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onBackground)
@@ -754,6 +759,9 @@ fun Notice(text: String, error: Boolean, dismiss: () -> Unit) {
 /** A failed send says so under the bubble; a tap on it (or the bubble) sends it again. */
 @Composable
 fun NotSent(retry: () -> Unit) {
-    Text("Not sent. Tap to retry.", Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = retry).padding(horizontal = 6.dp, vertical = 2.dp),
-        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+    Row(Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = retry).padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(Icons.failed, null, Modifier.size(14.dp), tint = Status.error)
+        Text("Not sent. Tap to retry.", style = MaterialTheme.typography.labelMedium, color = Status.error)
+    }
 }
