@@ -520,7 +520,8 @@ private fun Names(requests: List<Room>, shown: Int, marks: Boolean, last: Boolea
             Text(room.name + if (i < shown - 1) "," else "", Modifier.then(if (last) Modifier.weight(1f, fill = false) else Modifier),
                 style = style, color = grey, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
-        if (shown < requests.size) Text("+${requests.size - shown}", style = style.copy(fontFeatureSettings = "tnum"), color = grey, maxLines = 1)
+        // The mark keeps "+1" from reading "1+" on a right-to-left phone.
+        if (shown < requests.size) Text("\u200E+${requests.size - shown}", style = style.copy(fontFeatureSettings = "tnum"), color = grey, maxLines = 1)
     }
 }
 

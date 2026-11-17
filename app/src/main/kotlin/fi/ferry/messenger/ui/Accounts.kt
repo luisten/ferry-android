@@ -84,6 +84,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -568,14 +569,21 @@ fun ConnectionBanner(banner: Inbox.Banner, openAccounts: () -> Unit, relogin: (S
 /** T2's signed-out bar: in place of the composer while the chat's account is signed out. */
 @Composable
 fun RecoveryBar(name: String, identity: AccountIdentity?, login: () -> Unit) {
-    // iOS: one row (the thread is tinted with the account's ink, the button's label is the page's colour).
-    Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(24.dp))
-        .background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Icon(Icons.warning, null, Modifier.size(22.dp), tint = Status.warn)
-        Text("$name is signed out. Log in again to send and receive messages.", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+    // iOS: one row (the thread is tinted with the account's ink, the button's label is the page's colour). At large text
+    // sizes (as Welcome's: 1.5 and up) the button goes under the words, which would be a column of fragments beside it.
+    val bar = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(24.dp))
+        .background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp)
+    val glyph = @Composable { Icon(Icons.warning, null, Modifier.size(22.dp), tint = Status.warn) }
+    val words = @Composable { m: Modifier -> Text("$name is signed out. Log in again to send and receive messages.", m, style = MaterialTheme.typography.bodyMedium) }
+    val button = @Composable {
         Button(login, colors = ButtonDefaults.buttonColors(containerColor = identity?.color?.ink ?: MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.background)) { Text("Log in again", fontWeight = FontWeight.SemiBold) }
+    }
+    if (LocalDensity.current.fontScale >= 1.5f) Column(bar, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { glyph(); words(Modifier.weight(1f)) }
+        Box(Modifier.align(Alignment.End)) { button() }
+    } else Row(bar, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        glyph(); words(Modifier.weight(1f)); button()
     }
 }
 
