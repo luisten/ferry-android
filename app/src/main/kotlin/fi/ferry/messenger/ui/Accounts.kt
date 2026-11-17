@@ -546,16 +546,20 @@ fun ConnectionBanner(banner: Inbox.Banner, openAccounts: () -> Unit, relogin: (S
         account?.health == Health.Reconnecting -> Triple("Reconnecting to $name…", "Instagram dropped the connection. Retrying automatically.", null)
         else -> Triple("$name is signed out", "New messages to $handle aren't arriving.", "Log in" to { account?.let { relogin(it.id) }; Unit })
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(16.dp))
-        .background(MaterialTheme.colorScheme.surfaceVariant).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.warning, null, Modifier.size(18.dp), tint = if (banner == Inbox.Banner.Offline) MaterialTheme.colorScheme.onSurfaceVariant else Status.warn)
-            Text(title, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-        }
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (banner != Inbox.Banner.Offline) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            action?.let { (label, go) -> TextButton(go) { Text(label, fontWeight = FontWeight.SemiBold) } }
-            if (banner is Inbox.Banner.Account) TextButton({ AppModel.hiddenBanner = banner }) { Text("Later") }
+    // iOS: the account's avatar (32), title and body on the full width, the buttons a row under them (small, filled and outlined).
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(20.dp))
+        .background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (account != null && banner is Inbox.Banner.Account) AccountAvatar(AppModel.identities[account.id], account.profile?.avatar, account.displayName, 32.dp)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.warning, null, Modifier.size(16.dp), tint = Status.warn)
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            }
+            Text(body, style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (banner != Inbox.Banner.Offline) Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                action?.let { (label, go) -> SmallButton(label, filled = true, onClick = go) }
+                if (banner is Inbox.Banner.Account) SmallButton("Later", filled = false) { AppModel.hiddenBanner = banner }
+            }
         }
     }
 }

@@ -33,11 +33,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SwipeToDismissBox
@@ -76,6 +76,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -108,6 +110,8 @@ fun InboxScreen(
     val searching = !query.isNullOrBlank()
     val list = if (searching) Inbox.search(rooms, query!!, scope, logins) else Inbox.rooms(rooms, scope, Folder.CHATS, logins)
     val newRequests = if (searching || !AppModel.initialSyncDone) emptyList() else Inbox.newRequests(rooms, scope, logins, AppModel.requestsSeen)
+    // No first load yet and Instagram isn't answering: say so instead of showing placeholders for good.
+    val unreachable = !AppModel.initialSyncDone && AppModel.syncFailures >= 2
     BackHandler(query != null) { query = null }
 
     Scaffold(
@@ -167,12 +171,14 @@ fun InboxScreen(
                             ArchiveActions(room, { openThread(room.id) }) { ChatRow(room, showsMark = scope == Inbox.Scope.All && multiAccount, times, it) }
                             HorizontalDivider(Modifier.padding(start = 86.dp), color = MaterialTheme.colorScheme.outlineVariant)
                         }
-                    } else {
+                    } else if (!unreachable) {
                         items(8) { PlaceholderRow() }
                     }
                 } }
             }
-            if (AppModel.initialSyncDone && list.isEmpty() && newRequests.isEmpty()) {
+            if (unreachable) Empty(Icons.offline, "Can't reach Instagram", "Retrying. Your chats appear when it's back.") {
+                FilledTonalButton(AppModel::restartSync) { Text("Try Again") }
+            } else if (AppModel.initialSyncDone && list.isEmpty() && newRequests.isEmpty()) {
                 when {
                     searching -> Empty(Icons.search, "No results for “${query!!.trim()}”", "Check the spelling or try a new search.")
                     else -> EmptyInbox(scope, identity?.name)
@@ -242,7 +248,7 @@ fun ArchiveActions(room: Room, open: () -> Unit, row: @Composable (Modifier) -> 
 @Composable
 private fun RowScope.SwipeAction(
     swipe: SwipeToDismissBoxState, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, start: Boolean = false,
-    fill: Color = MaterialTheme.colorScheme.surfaceContainerHighest, ink: Color = LocalContentColor.current,
+    fill: Color = swipeArchive, ink: Color = Color.White,
 ) {
     val width = with(LocalDensity.current) { abs(runCatching { swipe.requireOffset() }.getOrDefault(0f)).toDp() }
     if (!start) Spacer(Modifier.weight(1f))
@@ -254,6 +260,9 @@ private fun RowScope.SwipeAction(
     }
     if (start) Spacer(Modifier.weight(1f))
 }
+
+/** iOS's `swipeArchive`: neutral and dark, under white (Archive and Unarchive). */
+private val swipeArchive: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF3A3A3C) else Color(0xFF1C1C1E)
 
 /** iOS's `swipeUnread` (decision A20): a neutral grey, set apart from Archive's, under white. */
 private val swipeUnread: Color @Composable get() = if (isSystemInDarkTheme()) Color(0xFF636366) else Color(0xFF48484A)
@@ -278,7 +287,7 @@ private fun EmptyInbox(scope: Inbox.Scope, name: String?) {
 }
 
 @Composable
-fun Empty(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, text: String) {
+fun Empty(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, text: String, action: (@Composable () -> Unit)? = null) {
     Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, Modifier.size(44.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(12.dp))
@@ -286,6 +295,7 @@ fun Empty(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, 
         Spacer(Modifier.height(6.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        action?.let { Spacer(Modifier.height(16.dp)); it() }
     }
 }
 
@@ -491,15 +501,44 @@ private fun RequestsCard(requests: List<Room>, showsMarks: Boolean, open: () -> 
         }
         Column(Modifier.weight(1f)) {
             Text(Inbox.requestsCardTitle(requests.size), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                requests.forEachIndexed { i, room ->
-                    if (showsMarks) identityOf(room)?.let { AccountMark(it, 14.dp) }
-                    Text(room.name + if (i < requests.size - 1) "," else "", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                }
-            }
+            // Every name if they fit, else the first two or one and "+N" (rather than cutting each name short), as iOS.
+            val counts = listOf(requests.size, 2, 1).filter { it <= requests.size }.distinct()
+            FirstThatFits(counts.size) { i -> Names(requests, counts[i], showsMarks, last = i == counts.lastIndex) }
         }
         Icon(Icons.chevron, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** The first `count` names of the Requests card, then "+N" for the rest; `last` (the last resort) may cut a name short. */
+@Composable
+private fun Names(requests: List<Room>, shown: Int, marks: Boolean, last: Boolean) {
+    val style = MaterialTheme.typography.bodySmall
+    val grey = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        requests.take(shown).forEachIndexed { i, room ->
+            if (marks) identityOf(room)?.let { AccountMark(it, 14.dp) }
+            Text(room.name + if (i < shown - 1) "," else "", Modifier.then(if (last) Modifier.weight(1f, fill = false) else Modifier),
+                style = style, color = grey, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+        }
+        if (shown < requests.size) Text("+${requests.size - shown}", style = style.copy(fontFeatureSettings = "tnum"), color = grey, maxLines = 1)
+    }
+}
+
+/**
+ * iOS's `ViewThatFits(in: .horizontal)`: the first of `count` options that fits the width on one line; the last one when
+ * none does (it is measured within the width, so it cuts itself short).
+ */
+@Composable
+private fun FirstThatFits(count: Int, option: @Composable (Int) -> Unit) {
+    SubcomposeLayout { constraints ->
+        var chosen = subcompose(0) { option(0) }.first().measure(constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity))
+        var i = 0
+        while (chosen.width > constraints.maxWidth && i < count - 1) {
+            i++
+            val unbounded = if (i == count - 1) constraints.copy(minWidth = 0) else constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity)
+            chosen = subcompose(i) { option(i) }.first().measure(unbounded)
+        }
+        layout(chosen.width, chosen.height) { chosen.place(0, 0) }
     }
 }
 
