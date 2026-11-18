@@ -484,7 +484,7 @@ private fun VideoCard(message: Message, media: MediaInfo, share: MessageKind.Sha
                         style = MaterialTheme.typography.labelMedium)
                 }
                 failed != null -> Pill(Icons.retry, "Try again")
-                unresolved -> Pill(Icons.download, if (share?.type == ShareType.STORY) "Load story" else "Load video")
+                unresolved -> Pill(Icons.download, if (share.type == ShareType.STORY) "Load story" else "Load video")
                 uploading -> Spinner()
                 progress != null -> Overlay(progress, failed = false)
                 else -> PlayGlyph()

@@ -373,7 +373,7 @@ fun Composer(
             }
             // While recording the field gives way to the strip; the mic stays where it is (it holds the press).
             if (recording) Box(Modifier.weight(1f)) {
-                VoiceRecorder.review?.let { ReviewPlayer(it) } ?: RecordingStrip(sendVoice!!)
+                VoiceRecorder.review?.let { ReviewPlayer(it) } ?: RecordingStrip(sendVoice)
             } else Column(Modifier.weight(1f).padding(vertical = 9.dp)) {
                 BasicTextField(
                     draft,

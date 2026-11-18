@@ -333,7 +333,7 @@ object Demo {
         val album = listOf(photo(1, 1080, 1350), photo(2, 1350, 1080), photo(3, 1080, 1080))
         val start = now - 90 * 60_000
         val parts = listOf<Triple<Boolean, Long, Map<String, JsonElement>>>(
-            Triple(false, 80, (album[0] as kotlinx.serialization.json.JsonObject) + mapOf("fi.ferry.album" to kotlinx.serialization.json.JsonArray(album))),
+            Triple(false, 80, album[0] + mapOf("fi.ferry.album" to kotlinx.serialization.json.JsonArray(album))),
             Triple(false, 78, buildJsonObject {
                 put("msgtype", "m.audio"); put("body", ""); put("url", "$cdn-voice.m4a")
                 putJsonObject("info") { put("mimetype", "audio/mp4"); put("duration", 12_500) }

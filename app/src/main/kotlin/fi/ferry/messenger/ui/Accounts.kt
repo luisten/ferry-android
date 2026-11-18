@@ -568,7 +568,7 @@ fun ConnectionBanner(banner: Inbox.Banner, openAccounts: () -> Unit, relogin: (S
     // iOS: the account's avatar (32), title and body on the full width, the buttons a row under them (small, filled and outlined).
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(20.dp))
         .background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (account != null && banner is Inbox.Banner.Account) AccountAvatar(AppModel.identities[account.id], account.profile?.avatar, account.displayName, 32.dp)
+        if (account != null) AccountAvatar(AppModel.identities[account.id], account.profile?.avatar, account.displayName, 32.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.warning, null, Modifier.size(16.dp), tint = Status.warn)
