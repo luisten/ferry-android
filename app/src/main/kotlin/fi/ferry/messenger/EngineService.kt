@@ -42,9 +42,12 @@ class EngineService : Service() {
     }
 }
 
-/** After a restart: back to connected, if there's an account. */
+/** After a restart, and after an update (Ferry's own in-app one included, A84): back to connected, if there's an account. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED && Sessions(context).accounts().isNotEmpty()) EngineService.start(context)
+        val action = intent.action
+        if ((action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) && Sessions(context).accounts().isNotEmpty()) {
+            EngineService.start(context)
+        }
     }
 }
