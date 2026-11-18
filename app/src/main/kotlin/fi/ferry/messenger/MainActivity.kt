@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import fi.ferry.messenger.ui.AccountScreen
 import fi.ferry.messenger.ui.AccountsSheet
@@ -50,7 +51,8 @@ class MainActivity : ComponentActivity() {
         // `--ez incoming true` and `--ez reaction true` bring a message and a reaction 10 s in, `--ez busy true` many
         // new messages in Harbor Coffee, `--ei group_older <n>` has the group page back from five messages (n pages
         // of 20 made-up ones after its own), `--ei group_extra <n>` adds n unread messages to the group (see `Demo`),
-        // `--ez clipboard true` puts two photos on the clipboard to paste into a chat's field (iOS 1.7's paste).
+        // `--ez clipboard true` puts two photos on the clipboard to paste into a chat's field (iOS 1.7's paste), `--ez update
+        // true` asks GitHub for the latest release now, for the update banner (a real check and download, A79).
         val demo = debuggable && intent.getBooleanExtra("demo", false)
         AppModel.start(applicationContext, demo, requestRoom = intent.getStringExtra("request_room")?.takeIf { debuggable },
             demoSignedOut = demo && intent.getBooleanExtra("signed_out", false),
@@ -69,6 +71,7 @@ class MainActivity : ComponentActivity() {
         }
         if (demo && intent.getBooleanExtra("clipboard", false)) demoClipboard()
         if (demo) demoVideos()
+        if (demo && intent.getBooleanExtra("update", false)) Updates.check(applicationContext, force = true)
         setContent { FerryTheme { App() } }
     }
 
@@ -117,6 +120,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         AppModel.foreground = true
+        Updates.check(applicationContext) // at most once a day, and only from here: never in the background (A79)
     }
 
     override fun onStop() {
@@ -195,4 +199,7 @@ private fun App() {
     )
     reloginOf?.let { id -> ReloginDialog(id, dismiss = { reloginOf = null }) { push(Screen.Login(relogin = id)) } }
     if (AppModel.accounts.isNotEmpty() && naming == null) NotificationsPrompt()
+    // An update Android wants confirmed: its own dialog, from the activity on screen.
+    val context = LocalContext.current
+    Updates.confirm?.let { LaunchedEffect(it) { Updates.confirm = null; context.startActivity(it) } }
 }
