@@ -5,6 +5,10 @@ What changes for people who use the app, in plain words. The format is
 
 ## [Unreleased]
 
+## [1.8] - 2026-11-18
+
+The iPhone app's 1.8.
+
 ### Added
 
 - Ferry tells you when there's a new version, with a banner in the inbox: tap **Update** and it downloads and
