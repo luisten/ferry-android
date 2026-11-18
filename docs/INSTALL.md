@@ -1,10 +1,11 @@
 # Installing Ferry Messenger on Android
 
-This is a test version (1.7.1) for friends. It isn't in an app store: you install a file by hand. It takes about five
-minutes.
+Ferry Messenger isn't in an app store: you install a file by hand. It takes about five minutes.
 
 **You need:** an Android 8.0 or newer phone with a 64-bit ARM processor (nearly every phone of the last years), an
-Instagram account, and the `.apk` file from the person who invited you. Only install it from them.
+Instagram account, and the `.apk` file from the
+[latest release](https://github.com/luisten/ferry-android/releases/latest). Only install it from there, or from
+someone you trust who got it there.
 
 ## Install
 
@@ -45,7 +46,7 @@ To check that your file is the developer's, its signing certificate's SHA-256 fi
 
 - Google is rolling out a developer verification requirement for apps installed outside Google Play, in some countries.
   Where it applies, Android may refuse to install an app like this one. It's a possibility, not something known for your
-  phone; if the install is blocked and says why, tell the person who invited you.
+  phone; if the install is blocked and says why, please report it (see below).
 - Ferry isn't made by Instagram or Meta, and Instagram can change how it works at any time. Using it is at your own
   risk.
 - Notifications depend on your phone letting Ferry run in the background (see Battery above).
@@ -57,9 +58,10 @@ To check that your file is the developer's, its signing certificate's SHA-256 fi
 
 ## Something wrong?
 
-Tell the person who invited you. Please include: your phone's make and model, its Android version, what you did, what
+Open an [issue](https://github.com/luisten/ferry-android/issues), or tell the person who gave you the app. Please
+include: your phone's make and model, its Android version, what you did, what
 you expected and what happened, and roughly when. A screenshot of a problem is welcome, but only of something you're
-happy to share: **never send a password, and don't send screenshots with other people's messages unless they're fine
+happy to share, and an issue is public: **never send a password, and don't send screenshots with other people's messages unless they're fine
 with it.**
 
 ## Removing it

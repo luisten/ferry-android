@@ -134,9 +134,13 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **Live checks use the two dummies only** (stand-ins `tamoveska` personal, `kivostudio` professional; real names only
   in the iOS repo's gitignored `docs/local/test-accounts.md`). Every login, launch, send and "Seen" is an Instagram
   action: count them (C6) and report them.
-- **The repo is private until the first clean version 1**, then public: no cookies, tokens, real account names or
-  home-directory paths in tracked files. Commit freely; **push only when the user asks**, after the scans in
-  Commands. Licence AGPL-3.0, like the iOS app.
+- **The repo is public** (`luisten/ferry-android`, since 2026-11-18, with a fresh history): no cookies, tokens, real
+  account names or home-directory paths in tracked files. Commit freely; **push only when the user asks**, after the scans in
+  Commands. Commits and tags use the GitHub no-reply author (`git config user.email` must print it before a commit;
+  a tag's tagger line carries it too). **Releases are signed tags `vX.Y.Z` the user makes with their own key**: never
+  sign or push a tag on their behalf. Licence AGPL-3.0, like the iOS app.
+- **The README's screenshots** (`docs/screenshots`, 540 px wide) are the demo's on the emulator: Welcome from a plain
+  launch with no account stored, the rest with `--ez demo true`, the status bar from SystemUI's demo mode (9:41).
 
 **Code**
 
