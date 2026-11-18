@@ -37,7 +37,8 @@ server and no account to create: nothing sits between you and Instagram.
 - You log in on Instagram's own login page, inside the app. The app never sees or stores your password.
 - Your Instagram session stays on your phone, locked with a key that can't leave it. It isn't part of your phone's
   backups.
-- The app talks only to Instagram.
+- The app talks only to Instagram and, unless you turn it off in Accounts, to GitHub once a day to see whether there's
+  a new version. It sends nothing about you or your accounts.
 - No analytics and no tracking.
 
 ## Good to know
