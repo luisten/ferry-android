@@ -90,8 +90,7 @@ object Updates {
             // A signature that doesn't match the installed app's is Android's INSTALL_FAILED_UPDATE_INCOMPATIBLE, a conflict
             // (STATUS_FAILURE_INCOMPATIBLE is a version or a phone the APK doesn't fit).
             PackageInstaller.STATUS_FAILURE_CONFLICT ->
-                fail("The update wasn't installed: it was signed with a different key than this Ferry Messenger. " +
-                    intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty())
+                fail("The update wasn't installed: it was signed with a different key than this Ferry Messenger.")
             else -> fail("The update wasn't installed. " + intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty())
         }
     }
