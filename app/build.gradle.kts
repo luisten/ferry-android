@@ -13,8 +13,8 @@ android {
         applicationId = "fi.ferry.messenger"
         minSdk = 26 // build-engine.sh's API level
         targetSdk = 36
-        versionCode = 18 // +1 for every release, never down: a phone refuses an "update" with a lower one (decision A25)
-        versionName = "1.7.1" // the iPhone app's version this one matches
+        versionCode = 19 // +1 for every release, never down: a phone refuses an "update" with a lower one (decision A25)
+        versionName = "1.8" // the iPhone app's version this one matches
         ndk { abiFilters += "arm64-v8a" } // the only engine build-engine.sh makes (every phone of the last years)
     }
     buildFeatures { compose = true }

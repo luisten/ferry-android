@@ -7,7 +7,7 @@ plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten
 (A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
 chat model and the design; this file holds what's Android's own.
 
-**Status:** iOS 1.7.1 parity (2026-11-17, built on branch `ios-1.7-parity`; version 1.7.1, code 18, decision A78; the decisions A12–A56 and the
+**Status:** iOS 1.7.1 parity (2026-11-17, built on branch `ios-1.7-parity`; version 1.8, code 19, decision A85; was 1.7.1, code 18, A78; the decisions A12–A56 and the
 known limitations are in [docs/DECISIONS.md](docs/DECISIONS.md)): the time in every bubble, day chips and the floating
 day, links, reaction pills, TalkBack's one label per bubble, swipe to reply (toward the end), mark as unread, up to 10
 photos and videos on a per-chat send line, paste and keyboard images, the camera from +, rotation and dark mode keeping
@@ -50,7 +50,7 @@ user-visible change adds a line under Unreleased.
 . docs/local/env.sh        # gitignored; sets JAVA_HOME (~/Library/Android/jdk/jdk-21.0.13+9/Contents/Home), ANDROID_HOME (~/Library/Android/sdk)
                            # and PATH (Homebrew's Go 1.27.3 in /opt/homebrew/bin, the JDK, platform-tools, emulator)
 ./gradlew assembleDebug                         # runs build-engine.sh (libigcore.so, arm64-v8a), then the APK
-./gradlew testDebugUnitTest                     # the model's and the screens' pure logic, on the JVM, 219, ~5 s (results: app/build/test-results)
+./gradlew testDebugUnitTest                     # the model's and the screens' pure logic, on the JVM, 225, ~5 s (results: app/build/test-results)
 ./gradlew assembleRelease                       # app/build/outputs/apk/release/app-release.apk; lintVitalRelease runs with it
 B=$ANDROID_HOME/build-tools/36.0.0; A=app/build/outputs/apk/release/app-release.apk
 $B/apksigner verify --print-certs $A            # one signer, CN=Ferry Messenger; its SHA-256 is the one in docs/INSTALL.md
@@ -125,7 +125,7 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
 - **Check screens on the demo first** (`--ez demo true`, `Demo.kt`, debug builds only): the iOS app's made-up accounts,
   chats, requests and group; the engine isn't even loaded, so it costs no Instagram action. Switches (with `--ez demo true`;
   `DemoTests` pins what each shows): `incoming` (Noor, 10 s in), `busy` (Harbor Coffee opens unread), `reaction` (a 😮
-  reaction and its log entry in Jonas Berg's chat, 10 s in), `clipboard` (two made-up JPEGs on the clipboard), `--ei
+  reaction and its log entry in Jonas Berg's chat, 10 s in), `clipboard` (two made-up JPEGs on the clipboard), `update` (a real update check now, A79), `--ei
   group_older n` (the group pages in from its newest five, then n pages of 20), `--ei group_extra n` (n more unread in
   the group), `signed_out`, `naming`, `connecting` (O4 for Tamo, then O5; with `signed_out`, O4 failed for Kivo). Always there: Ada Lind (days, links, emoji, a tombstone, a failed message),
   Ravi Shah (a reaction log entry), Elena's photo without a URL, Mira Holt's two videos (ours, and a loaded reel with a
@@ -202,8 +202,8 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   (O4 for Tamo; with `signed_out`, failed for Kivo); live, `--es
   signed_out_account <id>` shows that account signed out (locally, nothing sent) until it logs in again (A3's check).
 - **Notifications** (E8 = option 1, 2026-10-22; option 3, a relay and FCM shared with iOS, is the later decision):
-  `EngineService` (type `remoteMessaging`, started with the first account, at boot, stopped with the last one; never
-  in the demo) holds the process, and so the engine's connections, with a silent "Connected" notification. A live
+  `EngineService` (type `remoteMessaging`, started with the first account, at boot and after an update (`MY_PACKAGE_REPLACED`,
+  A84: an `adb install -r` with a stored live session connects it), stopped with the last one; never in the demo) holds the process, and so the engine's connections, with a silent "Connected" notification. A live
   update's new messages from others notify (`Notifier.messages`, DESIGN §3.3: title the contact, "to Studio", the
   account's colour); not a history page, the first sync, messages from before the process, requests or General
   (DESIGN §4.5), or the chat on screen, or a reaction log entry (D2: it makes the chat unread and moves it up, silently). Text is marked private (Android's sensitive-notification setting decides the
@@ -294,6 +294,10 @@ the counts with HOME (`adb shell input keyevent KEYCODE_HOME`), never by relaunc
   `Crossing.motion` (still with animations off or battery saver, paused below RESUMED). `Status.ok`/`warn`/`error` are iOS's hex values. Glyphs are a few
   Material Icons path strings in `ui/Icons.kt`, not a library. iOS draws SF Symbols, which Apple licenses for its
   platforms only: pick the closest Material icon (`tray.2` → `all_inbox`, outlined) and match the button around it. Profile pictures load https only, in memory (`Pictures`).
+- **Updates** (A79 to A84, `Updates.kt`): one HEAD to GitHub's `releases/latest` a day, from `MainActivity.onStart` only
+  (never the service, a job or the demo); the inbox's `UpdateBanner`; Update streams `ferry-messenger-X.Y.Z.apk` from
+  the `vX.Y.Z` release into a `PackageInstaller` session, `UpdateReceiver` takes Android's answer. That APK name is
+  load-bearing (A83); an Android-only fix adds a fourth number (A82). Android's same-signer rule is the only check.
 - An account gets its default name, colour and mark (`AccountIdentity.withDefaults`) only once Instagram has said who
   it is (its viewer, kept in SharedPreferences with identities, Requests markers and the scope); else a stored
   account from before would be named by its ID for good.

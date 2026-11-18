@@ -29,6 +29,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -57,7 +58,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedButton
@@ -100,6 +103,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import fi.ferry.messenger.AppModel
+import fi.ferry.messenger.Updates
 import fi.ferry.messenger.model.AccountColor
 import fi.ferry.messenger.model.AccountIdentity
 import fi.ferry.messenger.model.BridgeAPI
@@ -401,6 +405,17 @@ fun AccountsSheet(dismiss: () -> Unit, addAccount: () -> Unit, open: (String) ->
             }
             ActionRow("Add Instagram account", Icons.add, onClick = addAccount)
             }
+            Spacer(Modifier.height(24.dp))
+            GroupedSection(footer = "Once a day, Ferry asks GitHub whether there's a new version. It sends nothing about you or your accounts.") {
+                Row(
+                    Modifier.fillMaxWidth().toggleable(Updates.enabled, role = Role.Switch) { Updates.setEnabled(context, it) }
+                        .heightIn(min = 52.dp).padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Check for updates", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                    Switch(Updates.enabled, null)
+                }
+            }
             version?.let {
                 Text(it, Modifier.padding(start = 16.dp, top = 20.dp), style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -553,7 +568,7 @@ fun ConnectionBanner(banner: Inbox.Banner, openAccounts: () -> Unit, relogin: (S
     // iOS: the account's avatar (32), title and body on the full width, the buttons a row under them (small, filled and outlined).
     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(20.dp))
         .background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (account != null && banner is Inbox.Banner.Account) AccountAvatar(AppModel.identities[account.id], account.profile?.avatar, account.displayName, 32.dp)
+        if (account != null) AccountAvatar(AppModel.identities[account.id], account.profile?.avatar, account.displayName, 32.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Icon(Icons.warning, null, Modifier.size(16.dp), tint = Status.warn)
@@ -566,6 +581,57 @@ fun ConnectionBanner(banner: Inbox.Banner, openAccounts: () -> Unit, relogin: (S
             }
         }
     }
+}
+
+/**
+ * A newer Ferry (A79): Update downloads and installs it, with its progress here; Later puts it away until the next
+ * launch. Installing needs Android's "Install unknown apps" for Ferry, once: explained, then its settings page.
+ */
+@Composable
+fun UpdateBanner(version: String) {
+    val context = LocalContext.current
+    var explaining by remember { mutableStateOf(false) }
+    val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (context.packageManager.canRequestPackageInstalls()) Updates.install(context)
+    }
+    val progress = Updates.progress
+    val error = Updates.error
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(RoundedCornerShape(20.dp))
+        .background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.download, null, Modifier.size(16.dp))
+                Text("Ferry Messenger $version is available", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            }
+            val small = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp)
+            when {
+                progress != null && progress >= 1f -> Text("Installing…", style = small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                progress != null -> {
+                    Text("Downloading… ${(progress * 100).toInt()}%", style = small, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LinearProgressIndicator({ progress }, Modifier.fillMaxWidth().padding(top = 6.dp))
+                }
+                error != null -> Text(error, style = small, color = Status.error)
+            }
+            if (progress == null) Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallButton("Update", filled = true) {
+                    if (context.packageManager.canRequestPackageInstalls()) Updates.install(context) else explaining = true
+                }
+                SmallButton("Later", filled = false) { Updates.hidden = version }
+            }
+        }
+    }
+    if (explaining) AlertDialog(
+        onDismissRequest = { explaining = false },
+        title = { Text("Allow Ferry to install its updates") },
+        text = { Text("Android asks once whether Ferry may install apps. On the next page, switch on Allow from this source, then come back: the update starts by itself.") },
+        confirmButton = {
+            TextButton({
+                explaining = false
+                settings.launch(android.content.Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${context.packageName}")))
+            }) { Text("Open Settings") }
+        },
+        dismissButton = { TextButton({ explaining = false }) { Text("Not now") } },
+    )
 }
 
 /** T2's signed-out bar: in place of the composer while the chat's account is signed out. */

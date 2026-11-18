@@ -5,6 +5,20 @@ What changes for people who use the app, in plain words. The format is
 
 ## [Unreleased]
 
+## [1.8] - 2026-11-18
+
+The iPhone app's 1.8.
+
+### Added
+
+- Ferry tells you when there's a new version, with a banner in the inbox: tap **Update** and it downloads and
+  installs it, or **Later**. It looks once a day, only while the app is open; turn it off with **Check for updates** in
+  Accounts.
+
+### Fixed
+
+- After an update, Ferry reconnects in the background on its own, so notifications keep coming without opening it first.
+
 ## [1.7.1] - 2026-11-17
 
 The first version for friends: what the iPhone app has up to its 1.7.1.

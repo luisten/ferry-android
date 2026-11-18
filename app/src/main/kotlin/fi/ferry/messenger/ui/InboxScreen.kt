@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import fi.ferry.messenger.AppModel
+import fi.ferry.messenger.Updates
 import fi.ferry.messenger.model.BridgeAPI
 import fi.ferry.messenger.model.Inbox
 import fi.ferry.messenger.model.Inbox.Folder
@@ -158,6 +159,7 @@ fun InboxScreen(
                 // Offline waits for the first sync's own "can't reach" (none yet): a banner over an empty list says less.
                 Inbox.banner(AppModel.syncFailures, AppModel.accounts)?.takeIf { it != AppModel.hiddenBanner && (it != Inbox.Banner.Offline || AppModel.initialSyncDone) }
                     ?.let { ConnectionBanner(it, openAccounts, relogin) }
+                Updates.banner?.let { UpdateBanner(it) }
                 AppModel.toast?.let { Notice(it, error = false) { AppModel.toast = null } }
                 AppModel.actionError?.let { Notice(it, error = true) { AppModel.actionError = null } }
                 val times = rememberTimeFormats()

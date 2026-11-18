@@ -32,15 +32,28 @@ someone you trust who got it there.
 
 ## Updating
 
-Install the new `.apk` the same way, over the old one. Your accounts and chats stay. This works because every version
-is signed with the developer's own key. A build signed with a different key (a test build, say) won't install over it:
-uninstall Ferry first, which signs you out, then install and log in again.
+Ferry looks for a new version once a day while it's open. When there is one, the inbox shows **Ferry Messenger X.Y.Z
+is available**: tap **Update**. The first time, Android asks whether Ferry may install apps: tap **Open Settings**,
+switch on **Allow from this source** (also called "Install unknown apps"), and go back; the update starts by itself.
+Ferry downloads the new version from the same releases page and installs it. On Android 12 and newer that usually
+happens without another question, and Ferry closes and comes back as the new version (open it again if it doesn't);
+on older phones Android shows its own **Update** screen first. **Later** hides it for now.
+Don't want it to look? Switch off **Check for updates** in Accounts. It sends nothing about you or your accounts.
+
+You can also update by hand: install the new `.apk` the same way as the first time, over the old one. Either way your
+accounts and chats stay. This works because every version is signed with the developer's own key. A build signed with
+a different key (a test build, say) won't install over it: uninstall Ferry first, which signs you out, then install
+and log in again.
+
+**Obtainium instead:** if you use [Obtainium](https://github.com/ImranR98/Obtainium), an app that keeps apps up to date
+from their release pages, add `https://github.com/luisten/ferry-android` to it, and switch off Check for updates in
+Ferry so you aren't told twice.
 
 To check that your file is the developer's, its signing certificate's SHA-256 fingerprint is
 
 `75:D2:47:FA:A0:92:7E:AF:BD:35:8B:A6:B1:F2:5B:AD:6E:F5:E6:6A:40:6C:7A:14:73:E4:9B:A2:E0:79:ED:C4`
 
-(`apksigner verify --print-certs ferry-messenger-1.7.1.apk`, from the Android SDK's build-tools, shows it.)
+(`apksigner verify --print-certs ferry-messenger-1.8.apk`, from the Android SDK's build-tools, shows it.)
 
 ## Good to know
 
