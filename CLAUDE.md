@@ -2,47 +2,30 @@
 
 The Android version of [Ferry Messenger](https://github.com/luisten/ferry-messenger) (iPhone, SwiftUI): Instagram DMs
 straight from the phone through the same Go engine, `core/` of that repo (mautrix-meta, AGPL). The engine turns
-Instagram's data into Matrix-style chats and keeps Instagram's rules (stages 1–2 there); this app shows them. The
-plan is stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten/ferry-messenger/blob/main/docs/PLAN-android.md)
-(A0–A9, one step at a time, as the user directs). Its CLAUDE.md is the reference for Instagram's behaviour, the
-chat model and the design; this file holds what's Android's own.
+Instagram's data into Matrix-style chats and keeps Instagram's rules (stages 1–2 there); this app shows them. It was
+stage 3 of that repo's [docs/PLAN-android.md](https://github.com/luisten/ferry-messenger/blob/main/docs/PLAN-android.md)
+(A0–A9, done). That repo's CLAUDE.md is the reference for Instagram's behaviour, the chat model and the design
+(`docs/design/DESIGN.md`); this file holds what's Android's own.
 
-**Status:** iOS 1.7.1 parity (2026-11-17, built on branch `ios-1.7-parity`; version 1.8, code 19, decision A85; was 1.7.1, code 18, A78; the decisions A12–A56 and the
-known limitations are in [docs/DECISIONS.md](docs/DECISIONS.md)): the time in every bubble, day chips and the floating
-day, links, reaction pills, TalkBack's one label per bubble, swipe to reply (toward the end), mark as unread, up to 10
-photos and videos on a per-chat send line, paste and keyboard images, the camera from +, rotation and dark mode keeping
-the open chat, the engine at iOS 1.7 (reaction log entries, camera media). Checked on the demo and the headless emulator
-by two independent testers (a fix round after each), then live on the signed release build between the dummies
-(2026-11-17, the emulator: send with a link, swipe to reply, three photos in their order, a reaction moving the chat up
-unread, the other account's notification; after R4 a removal and a re-login through the new login screen, O4 and O5).
-Not with TalkBack, haptics or on a real phone: the list is in DECISIONS.md. iOS 1.5.1 (2026-10-23): the 0.3 s hold, holding any card (an opened set's too), and the link preview's
-picture and tap, the last a gap from before; checked on the demo. iOS 1.1–1.2's last gaps (2026-10-22): Chat Info (`ui/ChatInfo.kt`) and the person card, Share in the
-photo viewer and Share All, swipe to archive, pull to refresh, drag to reorder accounts; checked on the demo. With it
-Android has all of iOS 1.0–1.5. iOS 1.5 parity (2026-10-22): the iOS logo and launch screen; a chat that opens unread holds its "New
-messages" line; the jump-to-newest button; listening back to a voice note; the long press's reaction sheet with recent
-and any emoji; iOS's thread header, composer and inbox bottom bar. A8 (2026-10-22), first part: notifications by E8's option 1 (the user's choice: a foreground service,
-`EngineService`, keeps the engine connected while Ferry is closed; `Notifier`); checked on the demo. Still A8: days on a
-real phone for battery and phone makers' battery savers, and whether Instagram minds the connection. A7: accounts (`ui/Welcome.kt`, `ui/Onboarding.kt`, `ui/Accounts.kt`: Welcome, "Name this account" for each new account and "Add
-another account?" after the first, the identity editor, each account's page with Remove Account, the signed-out
-prompt and bar, the inbox's banner; `AppModel.login(relogin)` refuses a different account). A6 and A7 checked live
-2026-10-22 (re-login, a photo and a voice note to kivostudio, the viewer, Load story on an expired story). A6: media (`ui/Media.kt`: photo, album, GIF and sticker, video, reel and story with "Load
-video", post and voice cards, the full-screen viewer; `MediaFiles` the download cache; `Outgoing` getting a pick ready;
-`VoiceRecorder`, `VoicePlayer`); checked on the demo only. A5 (2026-10-21): requests (`RequestBar`: Accept, Delete, "Reply instead"), Archive and Unarchive (this
-phone only), New Message (`ui/NewMessageScreen.kt`: From account, Instagram's people search, the DM); checked live,
-requests through the engine's forced request (`--es request_room`). A4: the thread, write side (`ui/Composer.kt`: the composer, the message menu; `AppModel`'s
-send, reply, react, edit, unsend, typing, with a local echo and "Not sent. Tap to retry"; checked live between
-the dummies). A3: the thread, read side
-(`ui/ThreadScreen.kt`: bubbles, group runs, replies, reactions, "Seen" and "Seen by", Instagram's own lines, the start
-block, older pages; media as labelled cards until A6). A2: the
-inbox, read-only (`ui/`: account stack, scope chips, Folders menu, Requests card,
-rows, search, the folder lists, a minimal Accounts sheet) on `AppModel`, which connects the stored accounts and
-applies the engine's updates. A1: the chat model (`model/`, the iOS app's `Room`, `Timeline`, `Inbox`, in Kotlin) with
-its unit tests on the engine's golden files and the Matrix-style fixtures. A0: the Gradle project, the engine with its
-JNI bridge, the login. A9 (2026-11-17): the signed release APK (`assembleRelease`, the key from Gradle properties: Commands) and the friends'
-install guide, [docs/INSTALL.md](docs/INSTALL.md), which carries the signing certificate's fingerprint; its install on a
-real phone is still to be seen. The engine is pinned at 2d2db9d, iOS 1.7.1 (The engine). The README and the install guide are for
-users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md) ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a
-user-visible change adds a line under Unreleased.
+**Status:** 1.8 (`versionCode` 19, A85), at the iPhone app's 1.8: everything it has up to 1.7.1, plus in-app updates
+(A79–A84) and notifications while Ferry is closed (E8: a foreground service). Every decision since A12, and the known
+limitations, are in [docs/DECISIONS.md](docs/DECISIONS.md) (its D1–D11 are this repo's, not the iOS repo's D series).
+Checked on the demo and the headless emulator, and live on the signed release build between the dummies (2026-11-17).
+Still open: days on a real phone for battery and phone makers' battery savers, and whether Instagram minds the
+always-on connection (A8); the release's install on a real phone (A9); TalkBack and haptics on a phone. The engine is
+pinned at 2d2db9d, iOS 1.7.1 (The engine).
+
+Where things are: `model/` is the iOS app's `Room`, `Timeline` and `Inbox` in Kotlin, tested on the engine's golden
+files and the Matrix-style fixtures; `AppModel` connects the stored accounts (`Sessions`) and applies the engine's
+updates, sends through `SendQueue` with a local echo, and refuses a different account on re-login (`login(relogin)`);
+`EngineService` and `Notifier` are the notifications; `Updates` the update check; `MediaFiles` the download cache,
+`Outgoing` getting a pick ready, `VoiceRecorder`/`VoicePlayer` voice notes; `LoginScreen` the web login. The screens
+are in `ui/`: `Welcome`, `Onboarding`, `InboxScreen` (account stack, scope chips, Folders menu, Requests card, search),
+`FolderScreen`, `ThreadScreen` (bubbles, groups, replies, reactions, "Seen", the start block, older pages, swipe to
+reply), `Composer` (the composer, the message menu, `+` and the camera), `Media` (the cards and the full-screen
+viewer), `NewMessageScreen`, `ChatInfo`, `Accounts` (each account's page, Remove Account, the signed-out prompt).
+The README and the install guide are for users (plain words, no internals), and so is [CHANGELOG.md](CHANGELOG.md)
+([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)): a user-visible change adds a line under Unreleased.
 
 ## Commands
 
