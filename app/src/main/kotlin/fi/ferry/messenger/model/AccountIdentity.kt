@@ -88,7 +88,7 @@ data class AccountIdentity(val name: String, val color: AccountColor, val mark: 
 
         /**
          * Mark chips (DESIGN O5): the first distinct letters of the name, then a few emoji, minus marks already taken. No
-         * camera: next to "Instagram" it was the one Instagram-like glyph in the app (review 2026-10-15 #12).
+         * camera: next to "Instagram" it was the one Instagram-like glyph in the app.
          */
         fun markSuggestions(name: String, taken: Set<String>): List<String> {
             val letters = mutableListOf<String>()

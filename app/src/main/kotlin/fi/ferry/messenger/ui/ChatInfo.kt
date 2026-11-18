@@ -86,7 +86,7 @@ fun ChatInfoScreen(room: Room, back: () -> Unit) {
                         subtitle?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                     if (identity != null) GroupedSection(footer = "Replies always come from this account.") {
-                        // "Account", not "In [tag]" (iOS review 2026-10-15 #6), with the handle.
+                        // "Account", not "In [tag]", with the handle.
                         InfoRow("Account") { AccountTag(identity, handle = login?.profile?.username) }
                         if (folder == Inbox.Folder.GENERAL) {
                             HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
