@@ -1,7 +1,8 @@
-# Decisions: Android, iOS 1.7 parity
+# Decisions: Android
 
-This logs the Android-side decisions for bringing Ferry Messenger for Android to iOS 1.7 parity (newest at the bottom).
-The iOS repo's `docs/DECISIONS.md` and `PLAN-android.md` hold the earlier ones.
+This logs the Android-side decisions since iOS 1.7 parity (2026-11-16), newest at the bottom. D1–D11 and A12 on are
+this repo's: the iOS repo's `docs/DECISIONS.md` has its own D1–D23, which mean something else. The earlier Android
+decisions are the iOS repo's `PLAN-android.md` (E1–E8, A0–A9).
 
 | ID | Date | Decision | Why | Revisit when |
 |---|---|---|---|---|

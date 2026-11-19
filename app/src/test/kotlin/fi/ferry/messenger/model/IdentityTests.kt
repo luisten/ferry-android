@@ -49,7 +49,7 @@ class IdentityTests {
         assertEquals("", AccountIdentity.normalizedMark(""))
     }
 
-    /** No camera among the emoji: next to "Instagram" it was the one Instagram-like glyph (review 2026-10-15 #12). */
+    /** No camera among the emoji: next to "Instagram" it was the one Instagram-like glyph. */
     @Test fun markSuggestionsSkipTakenMarks() {
         assertEquals(listOf("S", "T", "U", "✦", "⛵️", "🌊"), AccountIdentity.markSuggestions("Studio", emptySet()))
         assertEquals(listOf("T", "U", "D", "✦", "🌊"), AccountIdentity.markSuggestions("Studio", setOf("S", "⛵️")))
